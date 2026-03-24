@@ -410,8 +410,8 @@ void PositionPIDController::controlTimerCallback()
 void PositionPIDController::loadParameters()
 {
   control_frequency_ = declare_parameter<double>("control_frequency", 50.0);
-  map_frame_ = declare_parameter<std::string>("map_frame", "map");
-  laser_link_frame_ = declare_parameter<std::string>("laser_link_frame", "laser_link");
+  map_frame_ = declare_parameter<std::string>("map_frame", "a/camera_init");
+  laser_link_frame_ = declare_parameter<std::string>("laser_link_frame", "a/body");
   position_tolerance_ = declare_parameter<double>("position_tolerance", 6.0);
   yaw_tolerance_ = declare_parameter<double>("yaw_tolerance", 5.0);
   height_tolerance_ = declare_parameter<double>("height_tolerance", 6.0);

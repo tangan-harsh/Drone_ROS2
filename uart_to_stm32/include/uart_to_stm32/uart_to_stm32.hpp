@@ -10,6 +10,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/int16.hpp>
 #include <std_msgs/msg/u_int8.hpp>
@@ -30,27 +31,17 @@ public:
 
   bool initialize(double update_rate, const std::string & source_frame, const std::string & target_frame);
 
-private:
-  void lookupTransform();
-  void processTfTransform(const geometry_msgs::msg::TransformStamped & transform);
-  void velocityCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
+ private:
+  void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
   void targetVelocityCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg);
   Eigen::Vector3d transformVelocity(const Eigen::Vector3d & linear, double yaw);
   void sendVelocityToSerial(const Eigen::Vector3d & transformed_velocity);
   void sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_s, float vz_cm_per_s, float vyaw_deg_per_s);
   void sendA2ReadyResponse();
-  void activeControllerCallback(const std_msgs::msg::UInt8::SharedPtr msg);
   void protocolDataHandler(uint8_t id, const std::vector<uint8_t> & data);
 
   rclcpp::Node::SharedPtr node_;
-  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-  rclcpp::TimerBase::SharedPtr timer_;
-  double update_rate_;
-  std::string source_frame_;
-  std::string target_frame_;
-
-  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr velocity_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr target_velocity_sub_;
   rclcpp::Subscription<std_msgs::msg::UInt8MultiArray>::SharedPtr bluetooth_sub_;
   rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr active_controller_sub_;

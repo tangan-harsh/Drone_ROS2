@@ -7,6 +7,7 @@
 
 #include <tf2/exceptions.h>
 #include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/Geometry_msgs.hpp>
 
 namespace uart_to_stm32
 {
@@ -33,14 +34,10 @@ UartToStm32::UartToStm32(rclcpp::Node::SharedPtr node)
 /*
   析构函数：
   这是为了安全退出。
-  当对象被销毁时，先停止定时器，防止回调还在跑。
-  然后停止串口协议接收线程，并关闭串口链接，释放资源。
+  当对象被销毁时，停止串口协议接收线程，并关闭串口链接，释放资源。
  */
 UartToStm32::~UartToStm32()
 {
-  if (timer_) {
-    timer_->cancel();
-  }
   if (serial_comm_) {
     serial_comm_->stop_protocol_receive();
     serial_comm_->close();
@@ -50,29 +47,26 @@ UartToStm32::~UartToStm32()
 /*
   初始化函数：
   这是一个非常核心的函数，相当于整个模块的 "Start" 按钮。
-  1. 保存配置参数：更新频率、TF坐标系的源和目标。
+  1. 保存配置参数：更新频率。
   2. 初始化串口：尝试打开 /dev/ttyS6 串口，波特率 921600。如果失败会报错返回。
-  3. 初始化 TF 监听器：用于获取 tf2 坐标变换（比如 map -> laser_link 的位姿）。
-  4. 创建定时器：以 update_rate_ 的频率周期性执行 lookupTransform()，查询TF。
-  5. 订阅话题：
-     - /velocity_map: 其实是里程计或者SLAM算出来的当前速度。
-     - /target_velocity: PID 控制器算出来的目标控制速度（就是我们之前聊的那个）。
-     - /active_controller: 监听控制模式（比如是不是切换到无人机模式）。
-  6. 创建发布者：
+  3. 订阅话题：
+     - /a/Odometry: DCL-SLAM 输出的里程计话题，包含位姿和速度。
+     - /target_velocity: PID 控制器算出来的目标控制速度。
+  4. 创建发布者：
      - /height: 发布高度信息（从串口读上来的气压计或激光测距数据）。
-     - /is_st_ready: 发布底层STM32的就绪状态。
+     - /is_st_ready: 发布底层 STM32 的就绪状态。
      - /mission_step: 发布任务步骤。
-  7. 开启串口接收：注册回调函数 protocolDataHandler，只要串口收到数据就丢给它处理。
+  5. 开启串口接收：注册回调函数 protocolDataHandler，只要串口收到数据就丢给它处理。
  */
 bool UartToStm32::initialize(double update_rate, const std::string & source_frame, const std::string & target_frame)
 {
+  (void)source_frame;
+  (void)target_frame;
+  
   try {
     update_rate_ = update_rate;
-    source_frame_ = source_frame;
-    target_frame_ = target_frame;
 
     RCLCPP_INFO(node_->get_logger(), "UartToStm32 initialized with update rate: %.1f Hz", update_rate_);
-    RCLCPP_INFO(node_->get_logger(), "Looking for transform from '%s' to '%s'", source_frame_.c_str(), target_frame_.c_str());
 
     serial_comm_ = std::make_unique<serial_comm::SerialComm>();
     if (!serial_comm_->initialize("/dev/ttyS6", 921600)) {
@@ -82,32 +76,14 @@ bool UartToStm32::initialize(double update_rate, const std::string & source_fram
     }
     RCLCPP_INFO(node_->get_logger(), "Serial port /dev/ttyS6 initialized at 921600 baudrate");
 
-    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-    const auto period = std::chrono::duration<double>(1.0 / update_rate_);
-    timer_ = node_->create_wall_timer(
-      period,
-      std::bind(&UartToStm32::lookupTransform, this));
-
-    velocity_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
-      "/velocity_map", 10,
-      std::bind(&UartToStm32::velocityCallback, this, std::placeholders::_1));
+    odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+      "/a/Odometry", 10,
+      std::bind(&UartToStm32::odometryCallback, this, std::placeholders::_1));
 
     target_velocity_sub_ = node_->create_subscription<std_msgs::msg::Float32MultiArray>(
       "/target_velocity", 10,
       std::bind(&UartToStm32::targetVelocityCallback, this, std::placeholders::_1));
-
-    auto active_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
-
-    active_controller_sub_ = node_->create_subscription<std_msgs::msg::UInt8>(
-      "/active_controller", active_qos,
-      std::bind(&UartToStm32::activeControllerCallback, this, std::placeholders::_1));
     
-        // bluetooth_sub_ = node_->create_subscription<std_msgs::msg::UInt8MultiArray>(
-    //   "/bluetooth_data", 10,
-    //   std::bind(&UartToStm32::bluetoothCallback, this, std::placeholders::_1));
-
     height_pub_ = node_->create_publisher<std_msgs::msg::Int16>("/height", 10);
     is_st_ready_pub_ = node_->create_publisher<std_msgs::msg::UInt8>("/is_st_ready", rclcpp::QoS(10).transient_local());
     mission_step_pub_ = node_->create_publisher<std_msgs::msg::UInt8>("/mission_step", 10);
@@ -121,7 +97,7 @@ bool UartToStm32::initialize(double update_rate, const std::string & source_fram
       });
 
     RCLCPP_INFO(node_->get_logger(), "UartToStm32 initialized successfully");
-    RCLCPP_INFO(node_->get_logger(), "Subscribed to /velocity_map and /target_velocity topics");
+    RCLCPP_INFO(node_->get_logger(), "Subscribed to /a/Odometry and /target_velocity topics");
     return true;
 
   } catch (const std::exception & e) {
@@ -131,89 +107,43 @@ bool UartToStm32::initialize(double update_rate, const std::string & source_fram
 }
 
 /*
-  定时器回调函数：查询 TF 变换
-  定期被调用。尝试查找 source_frame (比如 map) 到 target_frame (比如 base_link) 的坐标变换。
-  如果查到了，就调用 processTfTransform 处理数据。
-  主要目的是为了获取当前的 Yaw (偏航角)，用来做速度分解。
+  里程计回调函数 (/a/Odometry)：
+  这个回调接收 DCL-SLAM 发布的里程计数据，包含：
+  - pose.pose.position: 位置 (x, y, z)
+  - pose.pose.orientation: 姿态四元数
+  - twist.twist.linear: 线速度
+  - twist.twist.angular: 角速度
+  
+  处理流程：
+  1. 从 Odometry 消息中提取线速度。
+  2. 从姿态四元数中提取 yaw 角。
+  3. 将速度从 camera_init 坐标系转换到 body 坐标系。
+  4. 通过串口发送给 STM32 底层。
  */
-void UartToStm32::lookupTransform()
+void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
-  try {
-    const auto transform = tf_buffer_->lookupTransform(
-      source_frame_, target_frame_, tf2::TimePointZero);
-    processTfTransform(transform);
-  } catch (const tf2::TransformException & ex) {
-    RCLCPP_DEBUG(node_->get_logger(), "Transform lookup failed: %s", ex.what());
-  }
-}
+  current_velocity_.linear = msg->twist.twist.linear;
+  current_velocity_.angular = msg->twist.twist.angular;
+  velocity_valid_ = true;
 
-/*
-  处理 TF 变换数据：
-  1. 从 TransformStamped 消息里提取旋转四元数。
-  2. 把四元数转成欧拉角 (Roll, Pitch, Yaw)。我们只关心 Yaw。
-  3. 更新成员变量 current_yaw_。
-  4. 如果当前也有有效的速度数据 (velocity_valid_)，
-     就立即把当前的实际速度转到 Body 坐标系，并通过串口发给底层作为反馈（这可能是给底层做状态监测用的）。
- */
-void UartToStm32::processTfTransform(const geometry_msgs::msg::TransformStamped & transform)
-{
-  const double x = transform.transform.translation.x;
-  const double y = transform.transform.translation.y;
-  const double z = transform.transform.translation.z;
-
-  const double qx = transform.transform.rotation.x;
-  const double qy = transform.transform.rotation.y;
-  const double qz = transform.transform.rotation.z;
-  const double qw = transform.transform.rotation.w;
-
-  tf2::Quaternion q(qx, qy, qz, qw);
-  tf2::Matrix3x3 m(q);
+  tf2::Quaternion q;
+  tf2::fromMsg(msg->pose.pose.orientation, q);
   double roll, pitch, yaw;
-  m.getRPY(roll, pitch, yaw);
-
+  tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
   current_yaw_ = yaw;
   yaw_valid_ = true;
 
-  RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 2000,
-    "Transform %s -> %s: pos(%.3f, %.3f, %.3f) rot(%.3f, %.3f, %.3f)",
-    source_frame_.c_str(), target_frame_.c_str(), x, y, z, roll, pitch, yaw);
-
-  if (velocity_valid_ && yaw_valid_) {
-    Eigen::Vector3d linear_vel(
-      current_velocity_.linear.x,
-      current_velocity_.linear.y,
-      current_velocity_.linear.z);
-    const Eigen::Vector3d transformed_vel = transformVelocity(linear_vel, current_yaw_);
-    sendVelocityToSerial(transformed_vel);
-  }
-}
-
-/*
-  速度回调函数 (/velocity_map)：
-  这个回调接收的是 SLAM 系统计算出来的当前实际速度（Map 坐标系下）。
-  当收到速度时：
-  1. 更新 velocity_valid_ = true。
-  2. 如果当前的 Yaw 也是有效的，就调用 transformVelocity 把 Map 速度转成 Body 速度。
-  3. 通过 sendVelocityToSerial 发给底层。
-  注意：这个很可能是发给底层做观测或者闭环反馈用的，而不是控制指令。
- */
-void UartToStm32::velocityCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
-{
-  current_velocity_ = *msg;
-  velocity_valid_ = true;
-
-  const double linear_x = msg->linear.x;
-  const double linear_y = msg->linear.y;
-  const double linear_z = msg->linear.z;
-  const double angular_x = msg->angular.x;
-  const double angular_y = msg->angular.y;
-  const double angular_z = msg->angular.z;
+  const double linear_x = msg->twist.twist.linear.x;
+  const double linear_y = msg->twist.twist.linear.y;
+  const double linear_z = msg->twist.twist.linear.z;
+  const double angular_x = msg->twist.twist.angular.x;
+  const double angular_y = msg->twist.twist.angular.y;
+  const double angular_z = msg->twist.twist.angular.z;
 
   RCLCPP_INFO_THROTTLE(
     node_->get_logger(), *node_->get_clock(), 2000,
-    "Velocity: linear(%.3f, %.3f, %.3f) angular(%.3f, %.3f, %.3f)",
-    linear_x, linear_y, linear_z, angular_x, angular_y, angular_z);
+    "Odometry: linear(%.3f, %.3f, %.3f) angular(%.3f, %.3f, %.3f) yaw=%.2f deg",
+    linear_x, linear_y, linear_z, angular_x, angular_y, angular_z, yaw * 180.0 / M_PI);
 
   if (yaw_valid_ && velocity_valid_) {
     Eigen::Vector3d linear_vel(linear_x, linear_y, linear_z);
@@ -490,17 +420,6 @@ void UartToStm32::sendA2ReadyResponse()
     RCLCPP_INFO(node_->get_logger(), "Sent A2 ready response (len=9, first=0x01)");
   } else {
     RCLCPP_WARN(node_->get_logger(), "Failed to send A2 ready response: %s", serial_comm_->get_last_error().c_str());
-  }
-}
-
-void UartToStm32::activeControllerCallback(const std_msgs::msg::UInt8::SharedPtr msg)
-{
-  if (msg->data == 2) {
-    RCLCPP_INFO(node_->get_logger(), "Received active_controller = 2 (Drone Mode), sending A2 ready response 3 times.");
-    for (int i = 0; i < 3; ++i) {
-      sendA2ReadyResponse();
-      std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 间隔100ms发送一次
-    }
   }
 }
 

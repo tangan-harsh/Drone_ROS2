@@ -9,9 +9,7 @@ def generate_launch_description() -> LaunchDescription:
             executable='uart_to_stm32_node',
             name='uart_to_stm32',
             parameters=[
-                {'update_rate': 100.0},
-                {'source_frame': 'map'},
-                {'target_frame': 'laser_link'}
+                {'update_rate': 100.0}
             ],
             output='screen'
         )

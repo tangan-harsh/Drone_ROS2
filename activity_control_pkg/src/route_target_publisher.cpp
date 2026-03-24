@@ -71,8 +71,8 @@ RouteTargetPublisherNode::RouteTargetPublisherNode(const rclcpp::NodeOptions & o
   height_tol_cm_ = declare_parameter("height_tolerance_cm", 12.0);
   
   // 2. 加载坐标系配置
-  map_frame_ = declare_parameter("map_frame", "map");
-  laser_link_frame_ = declare_parameter("laser_link_frame", "laser_link");
+  map_frame_ = declare_parameter("map_frame", "a/camera_init");
+  laser_link_frame_ = declare_parameter("laser_link_frame", "a/body");
   output_topic_ = declare_parameter("output_topic", "/target_position");
 
   // 3. 初始化 TF 监听器
