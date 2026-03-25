@@ -7,8 +7,8 @@
 
 #include <tf2/exceptions.h>
 #include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/Geometry_msgs.hpp>
 
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 namespace uart_to_stm32
 {
 
@@ -22,7 +22,6 @@ using namespace std::chrono_literals;
  */
 UartToStm32::UartToStm32(rclcpp::Node::SharedPtr node)
 : node_(std::move(node)),
-  update_rate_(0.0),
   current_yaw_(0.0),
   yaw_valid_(false),
   velocity_valid_(false),
@@ -58,16 +57,9 @@ UartToStm32::~UartToStm32()
      - /mission_step: 发布任务步骤。
   5. 开启串口接收：注册回调函数 protocolDataHandler，只要串口收到数据就丢给它处理。
  */
-bool UartToStm32::initialize(double update_rate, const std::string & source_frame, const std::string & target_frame)
+bool UartToStm32::initialize()
 {
-  (void)source_frame;
-  (void)target_frame;
-  
   try {
-    update_rate_ = update_rate;
-
-    RCLCPP_INFO(node_->get_logger(), "UartToStm32 initialized with update rate: %.1f Hz", update_rate_);
-
     serial_comm_ = std::make_unique<serial_comm::SerialComm>();
     if (!serial_comm_->initialize("/dev/ttyS6", 921600)) {
       RCLCPP_ERROR(node_->get_logger(), "Failed to initialize serial port /dev/ttyS6 at 921600 baudrate");
@@ -122,8 +114,6 @@ bool UartToStm32::initialize(double update_rate, const std::string & source_fram
  */
 void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
-  current_velocity_.linear = msg->twist.twist.linear;
-  current_velocity_.angular = msg->twist.twist.angular;
   velocity_valid_ = true;
 
   tf2::Quaternion q;
@@ -141,37 +131,17 @@ void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
   const double angular_z = msg->twist.twist.angular.z;
 
   RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 2000,
+    node_->get_logger(), *node_->get_clock(), 5000,
     "Odometry: linear(%.3f, %.3f, %.3f) angular(%.3f, %.3f, %.3f) yaw=%.2f deg",
     linear_x, linear_y, linear_z, angular_x, angular_y, angular_z, yaw * 180.0 / M_PI);
 
   if (yaw_valid_ && velocity_valid_) {
-    Eigen::Vector3d linear_vel(linear_x, linear_y, linear_z);
-    const Eigen::Vector3d transformed_vel = transformVelocity(linear_vel, current_yaw_);
-    sendVelocityToSerial(transformed_vel);
+    Eigen::Vector3d body_vel(linear_x, linear_y, linear_z);
+    sendVelocityToSerial(body_vel);
   }
 }
 
-// void UartToStm32::bluetoothCallback(const std_msgs::msg::UInt8MultiArray::SharedPtr msg)
-// {
-//   if(msg->data.empty()) {
-//     RCLCPP_WARN(node_->get_logger(), "Received empty bluetooth_data message.");
-//     return;
-//   }
-//   constexpr uint8_t BLUETOOTH_FRAME_ID = 0x34;
-//   if(serial_comm_ && serial_comm_->is_open()) {
-//     if(serial_comm_->send_protocol_data(BLUETOOTH_FRAME_ID, static_cast<uint8_t>(msg->data.size()), msg->data)) {
-//       RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-//         "Sent bluetooth data %d",msg->data[0]);
-//     } else {
-//       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
-//         "Failed to send bluetooth data: %s", serial_comm_->get_last_error().c_str());
-//     }  } 
-//     else {
-//       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
-//         "Serial port is not open, cannot send bluetooth data");
-//     }
-// }
+
 
 /*
   速度转换函数 (Map -> Body)：
@@ -196,11 +166,9 @@ Eigen::Vector3d UartToStm32::transformVelocity(const Eigen::Vector3d & linear, d
   const Eigen::Vector3d transformed = Rz * linear;
 
   RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 2000,
-    "Velocity transform: yaw=%.3f deg, original(%.3f,%.3f,%.3f) -> transformed(%.3f,%.3f,%.3f)",
-    yaw * 180.0 / M_PI,
-    linear.x(), linear.y(), linear.z(),
-    transformed.x(), transformed.y(), transformed.z());
+    node_->get_logger(), *node_->get_clock(), 5000,
+    "Velocity: body_frame(%.3f,%.3f,%.3f)",
+    linear.x(), linear.y(), linear.z());
 
   return transformed;
 }
@@ -234,7 +202,7 @@ void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_veloc
     data[5] = static_cast<uint8_t>((vel_z >> 8) & 0xFF);
 
     if (serial_comm_->send_protocol_data(VELOCITY_FRAME_ID, static_cast<uint8_t>(data.size()), data)) {
-      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
         "Sent velocity data: x=%d, y=%d, z=%d (cm/s)", vel_x, vel_y, vel_z);
     } else {
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
@@ -265,7 +233,7 @@ void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray:
   const float vyaw_deg_per_s = msg->data[3];
 
   RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 1000,
+    node_->get_logger(), *node_->get_clock(), 2000,
     "Target Velocity: linear(%.1f, %.1f, %.1f)cm/s angular(%.1f)deg/s",
     vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
 
@@ -307,7 +275,7 @@ void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_
     data[7] = static_cast<uint8_t>((vel_yaw >> 8) & 0xFF);
 
     if (serial_comm_->send_protocol_data(TARGET_VELOCITY_FRAME_ID, static_cast<uint8_t>(data.size()), data)) {
-      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
         "Sent target velocity data: x=%d, y=%d, z=%d, yaw=%d",
         vel_x, vel_y, vel_z, vel_yaw);
     } else {
@@ -340,7 +308,7 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
         std_msgs::msg::UInt8 msg;
         msg.data = first;
         mission_step_pub_->publish(msg);
-        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
           "Published /mission_step: %u (from 0xF1 frame)", static_cast<unsigned>(first));
       }
       if (has_st_ready_pub_) {
@@ -354,7 +322,7 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
           is_st_ready_pub_->publish(msg);
           RCLCPP_INFO(node_->get_logger(), "Published /is_st_ready: 1 (from 0xF1 frame)");
         }
-        // sendA2ReadyResponse();
+        sendA2ReadyResponse();
         has_st_ready_pub_ = true;
       } else {
         RCLCPP_DEBUG(node_->get_logger(), "0xF1 frame second byte != 1 (%u), ignoring", static_cast<unsigned>(second));
@@ -372,7 +340,7 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
       msg.data = value;
       if (height_pub_) {
         height_pub_->publish(msg);
-        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
           "Published /height: %d", value);
       } else {
         RCLCPP_WARN(node_->get_logger(), "Height publisher not initialized");
