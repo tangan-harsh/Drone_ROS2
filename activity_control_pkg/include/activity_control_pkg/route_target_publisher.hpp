@@ -81,7 +81,19 @@ public:
    */
   std::size_t size() const;
 
-private:
+  /**
+   * @brief 加载预定义航点序列
+   * @param preset_name 预设名称 ("test_19", "simple_5", "none")
+   * @return true 加载成功，false 未知预设名称
+   * 
+   * 支持的预设：
+   * - "test_19": 19 个测试航点（起飞、水平飞行、旋转、降落）
+   * - "simple_5": 5 个简单航点（快速测试用）
+   * - "none": 不加载任何预设航点
+   */
+  bool loadPresetWaypoints(const std::string & preset_name);
+
+ private:
   /**
    * @brief 发布当前航点
    * 
@@ -178,6 +190,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr target_pub_;        ///< 发布目标位置 [x,y,z,yaw]
   rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr active_controller_pub_;         ///< 发布控制器激活信号 (2=无人机，3=停止)
   rclcpp::Subscription<std_msgs::msg::Int16>::SharedPtr height_sub_;                 ///< 订阅高度数据 (cm)
+
+  rclcpp::TimerBase::SharedPtr monitor_timer_;                                       ///< 航点监控定时器 (20Hz)
 
   // ==================== TF 变换 ====================
   

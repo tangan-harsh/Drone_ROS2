@@ -1,40 +1,28 @@
 #include "uart_to_stm32/uart_to_stm32.hpp"
-#include <iostream>
-  
+
 #include <chrono>
 #include <cmath>
 #include <utility>
 
 #include <tf2/exceptions.h>
 #include <tf2/LinearMath/Matrix3x3.h>
-
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+
 namespace uart_to_stm32
 {
 
 using namespace std::chrono_literals;
 
-/*
-  构造函数：
-  初始化节点，将传入的 shared_ptr 节点句柄保存到成员变量 node_ 中，
-  以便后续使用这个节点来创建发布者、订阅者、定时器和打印日志。
-  并将成员变量初始化为默认值。
- */
 UartToStm32::UartToStm32(rclcpp::Node::SharedPtr node)
 : node_(std::move(node)),
-  current_yaw_(0.0),
-  yaw_valid_(false),
-  velocity_valid_(false),
-  has_st_ready_pub_(false)
+  has_st_ready_pub_(false),
+  serial_port_(DEFAULT_SERIAL_PORT),
+  baud_rate_(DEFAULT_BAUD_RATE),
+  log_throttle_interval_(DEFAULT_LOG_THROTTLE_INTERVAL)
 {
   RCLCPP_INFO(node_->get_logger(), "UartToStm32 created");
 }
 
-/*
-  析构函数：
-  这是为了安全退出。
-  当对象被销毁时，停止串口协议接收线程，并关闭串口链接，释放资源。
- */
 UartToStm32::~UartToStm32()
 {
   if (serial_comm_) {
@@ -43,30 +31,25 @@ UartToStm32::~UartToStm32()
   }
 }
 
-/*
-  初始化函数：
-  这是一个非常核心的函数，相当于整个模块的 "Start" 按钮。
-  1. 保存配置参数：更新频率。
-  2. 初始化串口：尝试打开 /dev/ttyS6 串口，波特率 921600。如果失败会报错返回。
-  3. 订阅话题：
-     - /a/Odometry: DCL-SLAM 输出的里程计话题，包含位姿和速度。
-     - /target_velocity: PID 控制器算出来的目标控制速度。
-  4. 创建发布者：
-     - /height: 发布高度信息（从串口读上来的气压计或激光测距数据）。
-     - /is_st_ready: 发布底层 STM32 的就绪状态。
-     - /mission_step: 发布任务步骤。
-  5. 开启串口接收：注册回调函数 protocolDataHandler，只要串口收到数据就丢给它处理。
- */
 bool UartToStm32::initialize()
 {
   try {
+    serial_port_ = node_->declare_parameter<std::string>("serial_port", DEFAULT_SERIAL_PORT);
+    baud_rate_ = node_->declare_parameter<int>("baud_rate", DEFAULT_BAUD_RATE);
+    log_throttle_interval_ = node_->declare_parameter<int>("log_throttle_interval", DEFAULT_LOG_THROTTLE_INTERVAL);
+
+    RCLCPP_INFO(node_->get_logger(), "Serial configuration: port=%s, baud_rate=%d",
+                serial_port_.c_str(), baud_rate_);
+
     serial_comm_ = std::make_unique<serial_comm::SerialComm>();
-    if (!serial_comm_->initialize("/dev/ttyS6", 921600)) {
-      RCLCPP_ERROR(node_->get_logger(), "Failed to initialize serial port /dev/ttyS6 at 921600 baudrate");
+    if (!serial_comm_->initialize(serial_port_, baud_rate_)) {
+      RCLCPP_ERROR(node_->get_logger(), "Failed to initialize serial port %s at %d baudrate",
+                   serial_port_.c_str(), baud_rate_);
       RCLCPP_ERROR(node_->get_logger(), "Serial error: %s", serial_comm_->get_last_error().c_str());
       return false;
     }
-    RCLCPP_INFO(node_->get_logger(), "Serial port /dev/ttyS6 initialized at 921600 baudrate");
+    RCLCPP_INFO(node_->get_logger(), "Serial port %s initialized at %d baudrate",
+                serial_port_.c_str(), baud_rate_);
 
     odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       "/a/Odometry", 10,
@@ -75,12 +58,11 @@ bool UartToStm32::initialize()
     target_velocity_sub_ = node_->create_subscription<std_msgs::msg::Float32MultiArray>(
       "/target_velocity", 10,
       std::bind(&UartToStm32::targetVelocityCallback, this, std::placeholders::_1));
-    
-    height_pub_ = node_->create_publisher<std_msgs::msg::Int16>("/height", 10);
-    is_st_ready_pub_ = node_->create_publisher<std_msgs::msg::UInt8>("/is_st_ready", rclcpp::QoS(10).transient_local());
-    mission_step_pub_ = node_->create_publisher<std_msgs::msg::UInt8>("/mission_step", 10);
 
-    has_st_ready_pub_ = false;
+    height_pub_ = node_->create_publisher<std_msgs::msg::Int16>("/height", 10);
+    is_st_ready_pub_ = node_->create_publisher<std_msgs::msg::UInt8>(
+      "/is_st_ready", rclcpp::QoS(10).transient_local());
+    mission_step_pub_ = node_->create_publisher<std_msgs::msg::UInt8>("/mission_step", 10);
 
     serial_comm_->start_protocol_receive(
       [this](uint8_t id, const std::vector<uint8_t> & data) { protocolDataHandler(id, data); },
@@ -93,35 +75,25 @@ bool UartToStm32::initialize()
     return true;
 
   } catch (const std::exception & e) {
-    RCLCPP_ERROR(node_->get_logger(), "Failed to initialize topic subscriber: %s", e.what());
+    RCLCPP_ERROR(node_->get_logger(), "Failed to initialize: %s", e.what());
     return false;
   }
 }
 
-/*
-  里程计回调函数 (/a/Odometry)：
-  这个回调接收 DCL-SLAM 发布的里程计数据，包含：
-  - pose.pose.position: 位置 (x, y, z)
-  - pose.pose.orientation: 姿态四元数
-  - twist.twist.linear: 线速度
-  - twist.twist.angular: 角速度
-  
-  处理流程：
-  1. 从 Odometry 消息中提取线速度。
-  2. 从姿态四元数中提取 yaw 角。
-  3. 将速度从 camera_init 坐标系转换到 body 坐标系。
-  4. 通过串口发送给 STM32 底层。
+/**
+ * @brief Odometry callback - receives odometry data from DCL-SLAM
+ * @param msg Odometry message containing pose and velocity
+ * 
+ * Extracts linear velocity and yaw angle from odometry message,
+ * then sends velocity data to STM32 via serial port.
  */
 void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
-  velocity_valid_ = true;
 
   tf2::Quaternion q;
   tf2::fromMsg(msg->pose.pose.orientation, q);
   double roll, pitch, yaw;
   tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
-  current_yaw_ = yaw;
-  yaw_valid_ = true;
 
   const double linear_x = msg->twist.twist.linear.x;
   const double linear_y = msg->twist.twist.linear.y;
@@ -131,57 +103,25 @@ void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
   const double angular_z = msg->twist.twist.angular.z;
 
   RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 5000,
+    node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
     "Odometry: linear(%.3f, %.3f, %.3f) angular(%.3f, %.3f, %.3f) yaw=%.2f deg",
     linear_x, linear_y, linear_z, angular_x, angular_y, angular_z, yaw * 180.0 / M_PI);
 
-  if (yaw_valid_ && velocity_valid_) {
     Eigen::Vector3d body_vel(linear_x, linear_y, linear_z);
     sendVelocityToSerial(body_vel);
-  }
 }
 
-
-
-/*
-  速度转换函数 (Map -> Body)：
-  这是一个核心数学函数。它负责把全局地图坐标系下的速度矢量，旋转到机体坐标系下。
-  使用了一个二维旋转矩阵 Rz（绕Z轴旋转）：
-  |  cos(yaw)  sin(yaw)  0 |
-  | -sin(yaw)  cos(yaw)  0 |
-  |     0         0      1 |
-  如果你想验证 "Turn 180" 时控制会不会反，秘密就在这个矩阵里。
-  cos(180)=-1, sin(180)=0。
-  x_body = -1 * x_map
-  y_body = -1 * y_map
-  这证明了：如果我们给的是地图速度，必须经过这个转换，才能变成正确的机体控制量。
- */
-Eigen::Vector3d UartToStm32::transformVelocity(const Eigen::Vector3d & linear, double yaw)
-{
-  Eigen::Matrix3d Rz;
-  Rz << std::cos(yaw), std::sin(yaw), 0.0,
-    -std::sin(yaw), std::cos(yaw), 0.0,
-    0.0, 0.0, 1.0;
-
-  const Eigen::Vector3d transformed = Rz * linear;
-
-  RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 5000,
-    "Velocity: body_frame(%.3f,%.3f,%.3f)",
-    linear.x(), linear.y(), linear.z());
-
-  return transformed;
-}
-
-/*
-  发送 实际速度 反馈到底层串口 (ID: VELOCITY_FRAME_ID / 0x32)：
-  将计算好的 Body 系下的实际速度 (x, y, z)，放大 100 倍转成 int16 发送。
-  这通常是给飞控做观测用的反馈，不是控制指令。
+/**
+ * @brief Send velocity feedback to STM32 via serial port (Frame ID: 0x32)
+ * @param transformed_velocity Velocity in body frame (m/s)
+ * 
+ * Scales velocity by 100 and sends as int16 values in cm/s.
+ * This is velocity feedback for the flight controller, not a control command.
  */
 void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_velocity)
 {
   if (!serial_comm_ || !serial_comm_->is_open()) {
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
       "Serial port is not open, cannot send velocity data");
     return;
   }
@@ -202,10 +142,10 @@ void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_veloc
     data[5] = static_cast<uint8_t>((vel_z >> 8) & 0xFF);
 
     if (serial_comm_->send_protocol_data(VELOCITY_FRAME_ID, static_cast<uint8_t>(data.size()), data)) {
-      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
         "Sent velocity data: x=%d, y=%d, z=%d (cm/s)", vel_x, vel_y, vel_z);
     } else {
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
         "Failed to send velocity data: %s", serial_comm_->get_last_error().c_str());
     }
   } catch (const std::exception & e) {
@@ -213,11 +153,12 @@ void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_veloc
   }
 }
 
-/*
-  目标速度回调函数 (/target_velocity)：
-  这是**真正的控制指令入口**。
-  PID 控制器计算出期望速度，发到这里。
-  函数提取 vx, vy, vz, vyaw，然后调用 sendTargetVelocityToSerial 发给底层。
+/**
+ * @brief Target velocity callback - receives velocity commands from PID controller
+ * @param msg Target velocity command [vx_cm/s, vy_cm/s, vz_cm/s, vyaw_deg/s]
+ * 
+ * This is the main control command entry point. Extracts velocity components
+ * and forwards them to STM32 via serial port.
  */
 void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
 {
@@ -233,27 +174,28 @@ void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray:
   const float vyaw_deg_per_s = msg->data[3];
 
   RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), 2000,
+    node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
     "Target Velocity: linear(%.1f, %.1f, %.1f)cm/s angular(%.1f)deg/s",
     vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
 
   sendTargetVelocityToSerial(vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
 }
 
-/*
-  发送 目标速度 到底层串口 (ID: TARGET_VELOCITY_FRAME_ID / 0x31)：
-  将 PID 算出的目标速度直接由浮点转整型，打包发给 STM32。
-  
-  **重要观察**：
-  这里**直接**发送了传入的 vx, vy，没有在这个函数里做任何旋转变换！
-  这意味着：如果传入的 /target_velocity 是 Map 坐标系的，这里直接发出去，那就是发了 Map 速度。
-  如果 STM32 傻，那就真的反了。
-  所以，你在 PID 控制器里加的那段 "Map -> Body" 的旋转代码是**绝对必要且关键的**！
+/**
+ * @brief Send target velocity command to STM32 (Frame ID: 0x31)
+ * @param vx_cm_per_s X-axis velocity command (cm/s)
+ * @param vy_cm_per_s Y-axis velocity command (cm/s)
+ * @param vz_cm_per_s Z-axis velocity command (cm/s)
+ * @param vyaw_deg_per_s Yaw angular velocity command (deg/s)
+ * 
+ * Converts float velocity commands to int16 and sends to STM32.
+ * Note: This function sends the values directly without any coordinate transformation.
+ * Coordinate transformation (Map -> Body) should be done by the PID controller before publishing.
  */
 void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_s, float vz_cm_per_s, float vyaw_deg_per_s)
 {
   if (!serial_comm_ || !serial_comm_->is_open()) {
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
       "Serial port is not open, cannot send target velocity data");
     return;
   }
@@ -275,11 +217,11 @@ void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_
     data[7] = static_cast<uint8_t>((vel_yaw >> 8) & 0xFF);
 
     if (serial_comm_->send_protocol_data(TARGET_VELOCITY_FRAME_ID, static_cast<uint8_t>(data.size()), data)) {
-      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
         "Sent target velocity data: x=%d, y=%d, z=%d, yaw=%d",
         vel_x, vel_y, vel_z, vel_yaw);
     } else {
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
         "Failed to send target velocity data: %s", serial_comm_->get_last_error().c_str());
     }
   } catch (const std::exception & e) {
@@ -287,13 +229,15 @@ void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_
   }
 }
 
-/*
-  串口协议数据接收回调：
-  解析 STM32 发上来的数据包。
-  - ST_READY_QUERY_ID (0xF1): 飞控询问 "Ready?"。我们如果准备好了就回个包。
-    同时如果不为 1，说明底层还没准备好。
-  - 0x05: 接收高度数据，发布到 /height。
-  - 0xB1: 接收飞控当前的目标速度反馈（调试用）。
+/**
+ * @brief Protocol data handler - parses incoming data from STM32
+ * @param id Protocol frame ID
+ * @param data Protocol frame data
+ * 
+ * Handles the following protocol frames:
+ * - 0xF1 (ST_READY_QUERY_ID): ST ready query/response
+ * - 0x05 (HEIGHT_FRAME_ID): Height data from barometer/lidar
+ * - 0xB1: Target velocity feedback from flight controller
  */
 void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & data)
 {
@@ -308,7 +252,7 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
         std_msgs::msg::UInt8 msg;
         msg.data = first;
         mission_step_pub_->publish(msg);
-        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
           "Published /mission_step: %u (from 0xF1 frame)", static_cast<unsigned>(first));
       }
       if (has_st_ready_pub_) {
@@ -329,7 +273,7 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
       }
       break;
     }
-    case 0x05: {
+    case HEIGHT_FRAME_ID: {
       if (data.size() < 2) {
         RCLCPP_WARN(node_->get_logger(), "protocolDataHandler: ID 0x05 data too short");
         break;
@@ -340,30 +284,11 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
       msg.data = value;
       if (height_pub_) {
         height_pub_->publish(msg);
-        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
           "Published /height: %d", value);
       } else {
         RCLCPP_WARN(node_->get_logger(), "Height publisher not initialized");
       }
-      break;
-    }
-    case 0xB1: {  // 飞控发送的目标速度数据
-      if (data.size() < 8) {
-        RCLCPP_WARN(node_->get_logger(),
-                    "protocolDataHandler: ID 0xB1 data too short (expected 8, got %zu)", data.size());
-        break;
-      }
-
-      int16_t vel_x = static_cast<int16_t>(data[0] | (data[1] << 8));
-      int16_t vel_y = static_cast<int16_t>(data[2] | (data[3] << 8));
-      int16_t vel_z = static_cast<int16_t>(data[4] | (data[5] << 8));
-      int16_t yaw   = static_cast<int16_t>(data[6] | (data[7] << 8));
-
-      // 每秒打印两次日志（500ms一次）
-      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-        "[0xB1] Target Speed -> X:%d, Y:%d, Z:%d, Yaw:%d",
-        vel_x, vel_y, vel_z, yaw);
-
       break;
     }
     default: {
@@ -374,10 +299,16 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
   }
 }
 
+/**
+ * @brief Send A2 ready response to STM32 (Frame ID: 0xA2)
+ * 
+ * Responds to ST ready query (0xF1) when STM32 is ready.
+ * Sends a 9-byte response with first byte set to 0x01.
+ */
 void UartToStm32::sendA2ReadyResponse()
 {
   if (!serial_comm_ || !serial_comm_->is_open()) {
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
       "Serial port is not open, cannot send A2 ready response");
     return;
   }

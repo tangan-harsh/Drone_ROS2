@@ -90,7 +90,16 @@ RouteTargetPublisherNode::RouteTargetPublisherNode(const rclcpp::NodeOptions & o
     "/height", rclcpp::QoS(10),
     std::bind(&RouteTargetPublisherNode::heightCallback, this, std::placeholders::_1));
 
-  // 6. 打印初始化信息
+  // 6. 创建监控定时器 (20Hz = 50ms)
+  monitor_timer_ = create_wall_timer(
+    std::chrono::milliseconds(50),
+    std::bind(&RouteTargetPublisherNode::monitorTimerCallback, this));
+
+  // 7. 加载预设航点
+  std::string waypoint_preset = declare_parameter<std::string>("waypoint_preset", "none");
+  loadPresetWaypoints(waypoint_preset);
+
+  // 8. 打印初始化信息
   RCLCPP_INFO(
     get_logger(),
     "RouteTargetPublisher initialized: map=%s laser_link=%s topic=%s",
@@ -139,6 +148,70 @@ std::size_t RouteTargetPublisherNode::size() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return targets_.size();
+}
+
+/**
+ * @brief 加载预定义航点序列
+ * @param preset_name 预设名称 ("test_19", "simple_5", "none")
+ * @return true 加载成功，false 未知预设名称
+ */
+bool RouteTargetPublisherNode::loadPresetWaypoints(const std::string & preset_name)
+{
+  static constexpr std::array<Target, 19> kTest19Waypoints = {{
+    {0.0, 0.0, 130.0, 0.0},           // 1: 起飞
+    {103.0, -145.0, 130.0, 0.0},      // 2
+    {153.0, -145.0, 130.0, 0.0},      // 3
+    {203.0, -145.0, 130.0, 0.0},      // 4
+    {203.0, -145.0, 83.0, 0.0},       // 5: 下降
+    {153.0, -145.0, 83.0, 0.0},       // 6
+    {103.0, -145.0, 83.0, 0.0},       // 7
+    {-30.0, -145.0, 83.0, 0.0},       // 8
+    {-30.0, -260.0, 83.0, 0.0},       // 9
+    {-30.0, -260.0, 83.0, 90.0},      // 10: 旋转 90
+    {-30.0, -260.0, 83.0, 180.0},     // 11: 旋转 180
+    {103.0, -260.0, 83.0, 180.0},     // 12
+    {153.0, -260.0, 83.0, 180.0},     // 13
+    {203.0, -260.0, 83.0, 180.0},     // 14
+    {203.0, -260.0, 130.0, 180.0},    // 15: 上升
+    {153.0, -260.0, 130.0, 180.0},    // 16
+    {103.0, -260.0, 130.0, 180.0},    // 17
+    {280.0, -380.0, 130.0, 180.0},    // 18
+    {280.0, -380.0, 4.0, 180.0},      // 19: 降落
+  }};
+
+  static constexpr std::array<Target, 5> kSimple5Waypoints = {{
+    {0.0, 0.0, 100.0, 0.0},           // 1: 起飞
+    {50.0, 0.0, 100.0, 0.0},          // 2: X+ 飞行
+    {50.0, 50.0, 100.0, 0.0},         // 3: Y+ 飞行
+    {0.0, 50.0, 100.0, 90.0},         // 4: 旋转
+    {0.0, 0.0, 0.0, 90.0},            // 5: 降落
+  }};
+
+  if (preset_name == "test_19") {
+    for (const auto & wp : kTest19Waypoints) {
+      addTarget(wp);
+    }
+    RCLCPP_INFO(get_logger(), "Loaded %zu waypoints from preset '%s'", 
+                kTest19Waypoints.size(), preset_name.c_str());
+    return true;
+  }
+
+  if (preset_name == "simple_5") {
+    for (const auto & wp : kSimple5Waypoints) {
+      addTarget(wp);
+    }
+    RCLCPP_INFO(get_logger(), "Loaded %zu waypoints from preset '%s'", 
+                kSimple5Waypoints.size(), preset_name.c_str());
+    return true;
+  }
+
+  if (preset_name == "none") {
+    RCLCPP_INFO(get_logger(), "No preset waypoints loaded (preset='%s')", preset_name.c_str());
+    return true;
+  }
+
+  RCLCPP_WARN(get_logger(), "Unknown waypoint preset: '%s'", preset_name.c_str());
+  return false;
 }
 
 /**
@@ -351,7 +424,10 @@ void RouteTargetPublisherNode::monitorTimerCallback()
   if (!getCurrentPose(x_cm, y_cm, z_cm, yaw_deg)) {
     return;
   }
-
+  RCLCPP_INFO_THROTTLE(
+    this->get_logger(), *this->get_clock(), 5000,
+    "当前位置: x=%.1f,y=%.1f,z=%.1f,yaw=%.1f",
+    x_cm, y_cm, z_cm, yaw_deg);
   // 4. 获取当前目标并打印状态
   const Target & target = targets_[current_idx_];
   RCLCPP_INFO_THROTTLE(
@@ -498,7 +574,7 @@ void RouteTestNode::addTimerCallback()
   if (!started_) {
     return;
   }
-
+  
   // 预定义航点数组
   static constexpr std::array<Target, 19> kWaypoints = {{
     {0.0, 0.0, 130.0, 0.0},           // 1: 起飞

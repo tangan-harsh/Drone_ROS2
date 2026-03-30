@@ -20,12 +20,13 @@ def generate_launch_description():
             output="screen",
             parameters=[
                 {
-                    "map_frame": "map",
-                    "laser_link_frame": "laser_link",
+                    "map_frame": "a/camera_init",
+                    "laser_link_frame": "a/body",
                     "output_topic": "/target_position",
                     "position_tolerance_cm": 6.0,
                     "yaw_tolerance_deg": 5.0,
                     "height_tolerance_cm": 6.0,
+                    "waypoint_preset": "test_19",  # Options: "test_19", "simple_5", "none"
                 }
             ],
         )

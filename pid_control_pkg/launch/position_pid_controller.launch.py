@@ -12,8 +12,8 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[
                 {
                     "control_frequency": 50.0,
-                    "map_frame": "map",
-                    "laser_link_frame": "laser_link",
+                    "map_frame": "a/camera_init",
+                    "laser_link_frame": "a/body",
                     "position_tolerance": 6.0,
                     "yaw_tolerance": 5.0,
                     "height_tolerance": 6.0,
