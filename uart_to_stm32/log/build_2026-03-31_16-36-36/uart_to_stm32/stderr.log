@@ -1,0 +1,17 @@
+CMake Error at CMakeLists.txt:15 (find_package):
+  By not providing "Findserial_comm.cmake" in CMAKE_MODULE_PATH this project
+  has asked CMake to find a package configuration file provided by
+  "serial_comm", but CMake did not find one.
+
+  Could not find a package configuration file provided by "serial_comm" with
+  any of the following names:
+
+    serial_commConfig.cmake
+    serial_comm-config.cmake
+
+  Add the installation prefix of "serial_comm" to CMAKE_PREFIX_PATH or set
+  "serial_comm_DIR" to a directory containing one of the above files.  If
+  "serial_comm" provides a separate development package or SDK, be sure it
+  has been installed.
+
+

@@ -1,0 +1,80 @@
+[0.000000] (-) TimerEvent: {}
+[0.000230] (uart_to_stm32) JobQueued: {'identifier': 'uart_to_stm32', 'dependencies': OrderedDict()}
+[0.000470] (uart_to_stm32) JobStarted: {'identifier': 'uart_to_stm32'}
+[0.011244] (uart_to_stm32) JobProgress: {'identifier': 'uart_to_stm32', 'progress': 'cmake'}
+[0.011792] (uart_to_stm32) Command: {'cmd': ['/usr/bin/cmake', '/home/intelcup/ws_drone/src/Drone_ROS2/uart_to_stm32', '-DCMAKE_INSTALL_PREFIX=/home/intelcup/ws_drone/src/Drone_ROS2/uart_to_stm32/install/uart_to_stm32'], 'cwd': '/home/intelcup/ws_drone/src/Drone_ROS2/uart_to_stm32/build/uart_to_stm32', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('LANGUAGE', 'zh_CN:zh'), ('USER', 'intelcup'), ('AGENT', '1'), ('XDG_SESSION_TYPE', 'wayland'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/home/intelcup/ws_livox/install/livox_sdk2/lib:/home/intelcup/ws_livox/install/livox_ros_driver2/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/home/intelcup'), ('OLDPWD', '/home/intelcup/ws_drone'), ('DESKTOP_SESSION', 'ubuntu'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('SYSTEMD_EXEC_PID', '1182'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('IM_CONFIG_PHASE', '1'), ('WAYLAND_DISPLAY', 'wayland-0'), ('COLCON_PREFIX_PATH', '/home/intelcup/ws_livox/install'), ('ROS_DISTRO', 'humble'), ('LOGNAME', 'intelcup'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'intelcup'), ('TERM', 'xterm-256color'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('OPENCODE', '1'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/intelcup-UP-ADLN01:@/tmp/.ICE-unix/837,unix/intelcup-UP-ADLN01:/tmp/.ICE-unix/837'), ('XDG_MENU_PREFIX', 'gnome-'), ('GNOME_TERMINAL_SCREEN', '/org/gnome/Terminal/screen/6c5e6abb_57ae_47fe_856e_6f7aa41a7943'), ('GNOME_SETUP_DISPLAY', ':1'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('DISPLAY', ':0'), ('OPENCODE_PID', '2553'), ('LANG', 'zh_CN.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/.mutter-Xwaylandauth.AD6YM3'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('GNOME_TERMINAL_SERVICE', ':1.103'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('AMENT_PREFIX_PATH', '/home/intelcup/ws_livox/install/livox_ros_driver2:/opt/ros/humble'), ('SHELL', '/bin/bash'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/intelcup/ws_drone/src/Drone_ROS2/uart_to_stm32/build/uart_to_stm32'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/home/intelcup/ws_livox/install/livox_ros_driver2/local/lib/python3.10/dist-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('VTE_VERSION', '6800'), ('CMAKE_PREFIX_PATH', '/home/intelcup/ws_livox/install/livox_ros_driver2:/opt/ros/humble')]), 'shell': False}
+[0.099827] (-) TimerEvent: {}
+[0.200301] (-) TimerEvent: {}
+[0.201833] (uart_to_stm32) StdoutLine: {'line': b'-- The C compiler identification is GNU 11.4.0\n'}
+[0.300431] (-) TimerEvent: {}
+[0.398884] (uart_to_stm32) StdoutLine: {'line': b'-- The CXX compiler identification is GNU 11.4.0\n'}
+[0.400577] (-) TimerEvent: {}
+[0.412963] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting C compiler ABI info\n'}
+[0.499750] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting C compiler ABI info - done\n'}
+[0.500629] (-) TimerEvent: {}
+[0.508839] (uart_to_stm32) StdoutLine: {'line': b'-- Check for working C compiler: /usr/bin/cc - skipped\n'}
+[0.513726] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting C compile features\n'}
+[0.514778] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting C compile features - done\n'}
+[0.520548] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info\n'}
+[0.601167] (-) TimerEvent: {}
+[0.647738] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info - done\n'}
+[0.659422] (uart_to_stm32) StdoutLine: {'line': b'-- Check for working CXX compiler: /usr/bin/c++ - skipped\n'}
+[0.659727] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting CXX compile features\n'}
+[0.660304] (uart_to_stm32) StdoutLine: {'line': b'-- Detecting CXX compile features - done\n'}
+[0.701682] (-) TimerEvent: {}
+[0.802352] (-) TimerEvent: {}
+[0.902646] (-) TimerEvent: {}
+[0.932814] (uart_to_stm32) StdoutLine: {'line': b'-- Found Boost: /usr/lib/x86_64-linux-gnu/cmake/Boost-1.74.0/BoostConfig.cmake (found version "1.74.0") found components: system thread \n'}
+[0.941962] (uart_to_stm32) StdoutLine: {'line': b'-- Found ament_cmake: 1.3.13 (/opt/ros/humble/share/ament_cmake/cmake)\n'}
+[1.002763] (-) TimerEvent: {}
+[1.102984] (-) TimerEvent: {}
+[1.140569] (uart_to_stm32) StdoutLine: {'line': b'-- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter \n'}
+[1.203098] (-) TimerEvent: {}
+[1.293575] (uart_to_stm32) StdoutLine: {'line': b'-- Found rclcpp: 16.0.18 (/opt/ros/humble/share/rclcpp/cmake)\n'}
+[1.304373] (-) TimerEvent: {}
+[1.377887] (uart_to_stm32) StdoutLine: {'line': b'-- Found rosidl_generator_c: 3.1.8 (/opt/ros/humble/share/rosidl_generator_c/cmake)\n'}
+[1.388210] (uart_to_stm32) StdoutLine: {'line': b'-- Found rosidl_adapter: 3.1.8 (/opt/ros/humble/share/rosidl_adapter/cmake)\n'}
+[1.404532] (-) TimerEvent: {}
+[1.409215] (uart_to_stm32) StdoutLine: {'line': b'-- Found rosidl_generator_cpp: 3.1.8 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)\n'}
+[1.442520] (uart_to_stm32) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c\n'}
+[1.486230] (uart_to_stm32) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp\n'}
+[1.504669] (-) TimerEvent: {}
+[1.582207] (uart_to_stm32) StdoutLine: {'line': b'-- Found rmw_implementation_cmake: 6.1.2 (/opt/ros/humble/share/rmw_implementation_cmake/cmake)\n'}
+[1.587890] (uart_to_stm32) StdoutLine: {'line': b'-- Found rmw_fastrtps_cpp: 6.2.10 (/opt/ros/humble/share/rmw_fastrtps_cpp/cmake)\n'}
+[1.604840] (-) TimerEvent: {}
+[1.705569] (-) TimerEvent: {}
+[1.720341] (uart_to_stm32) StdoutLine: {'line': b'-- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found version "3.0.2")  \n'}
+[1.751965] (uart_to_stm32) StdoutLine: {'line': b'-- Found FastRTPS: /opt/ros/humble/include  \n'}
+[1.795255] (uart_to_stm32) StdoutLine: {'line': b"-- Using RMW implementation 'rmw_fastrtps_cpp' as default\n"}
+[1.805666] (-) TimerEvent: {}
+[1.806757] (uart_to_stm32) StdoutLine: {'line': b'-- Found Threads: TRUE  \n'}
+[1.881626] (uart_to_stm32) StdoutLine: {'line': b'-- Found tf2_geometry_msgs: 0.25.19 (/opt/ros/humble/share/tf2_geometry_msgs/cmake)\n'}
+[1.905829] (-) TimerEvent: {}
+[1.928718] (uart_to_stm32) StdoutLine: {'line': b'-- Found eigen3_cmake_module: 0.1.1 (/opt/ros/humble/share/eigen3_cmake_module/cmake)\n'}
+[1.930799] (uart_to_stm32) StdoutLine: {'line': b'-- Found Eigen3: TRUE (found version "3.4.0") \n'}
+[1.930917] (uart_to_stm32) StdoutLine: {'line': b'-- Ensuring Eigen3 include directory is part of orocos-kdl CMake target\n'}
+[2.005928] (-) TimerEvent: {}
+[2.091064] (uart_to_stm32) StdoutLine: {'line': b'-- Found nav_msgs: 4.9.1 (/opt/ros/humble/share/nav_msgs/cmake)\n'}
+[2.106218] (-) TimerEvent: {}
+[2.125938] (uart_to_stm32) StderrLine: {'line': b'CMake Error at CMakeLists.txt:15 (find_package):\n'}
+[2.126171] (uart_to_stm32) StderrLine: {'line': b'  By not providing "Findserial_comm.cmake" in CMAKE_MODULE_PATH this project\n'}
+[2.126261] (uart_to_stm32) StderrLine: {'line': b'  has asked CMake to find a package configuration file provided by\n'}
+[2.126339] (uart_to_stm32) StderrLine: {'line': b'  "serial_comm", but CMake did not find one.\n'}
+[2.126414] (uart_to_stm32) StderrLine: {'line': b'\n'}
+[2.126485] (uart_to_stm32) StderrLine: {'line': b'  Could not find a package configuration file provided by "serial_comm" with\n'}
+[2.126556] (uart_to_stm32) StderrLine: {'line': b'  any of the following names:\n'}
+[2.126626] (uart_to_stm32) StderrLine: {'line': b'\n'}
+[2.126693] (uart_to_stm32) StderrLine: {'line': b'    serial_commConfig.cmake\n'}
+[2.126763] (uart_to_stm32) StderrLine: {'line': b'    serial_comm-config.cmake\n'}
+[2.126833] (uart_to_stm32) StderrLine: {'line': b'\n'}
+[2.126914] (uart_to_stm32) StderrLine: {'line': b'  Add the installation prefix of "serial_comm" to CMAKE_PREFIX_PATH or set\n'}
+[2.126991] (uart_to_stm32) StderrLine: {'line': b'  "serial_comm_DIR" to a directory containing one of the above files.  If\n'}
+[2.127073] (uart_to_stm32) StderrLine: {'line': b'  "serial_comm" provides a separate development package or SDK, be sure it\n'}
+[2.127144] (uart_to_stm32) StderrLine: {'line': b'  has been installed.\n'}
+[2.127210] (uart_to_stm32) StderrLine: {'line': b'\n'}
+[2.127274] (uart_to_stm32) StderrLine: {'line': b'\n'}
+[2.127346] (uart_to_stm32) StdoutLine: {'line': b'-- Configuring incomplete, errors occurred!\n'}
+[2.127418] (uart_to_stm32) StdoutLine: {'line': b'See also "/home/intelcup/ws_drone/src/Drone_ROS2/uart_to_stm32/build/uart_to_stm32/CMakeFiles/CMakeOutput.log".\n'}
+[2.134974] (uart_to_stm32) CommandEnded: {'returncode': 1}
+[2.167419] (uart_to_stm32) JobEnded: {'identifier': 'uart_to_stm32', 'rc': 1}
+[2.178899] (-) EventReactorShutdown: {}

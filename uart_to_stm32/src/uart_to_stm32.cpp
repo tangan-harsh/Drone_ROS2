@@ -81,11 +81,11 @@ bool UartToStm32::initialize()
 }
 
 /**
- * @brief Odometry callback - receives odometry data from DCL-SLAM
- * @param msg Odometry message containing pose and velocity
+ * @brief 里程计回调 - 接收来自 DCL-SLAM 的里程计数据
+ * @param msg 包含位姿和速度的里程计消息
  * 
- * Extracts linear velocity and yaw angle from odometry message,
- * then sends velocity data to STM32 via serial port.
+ * 从里程计消息中提取线速度和偏航角，
+ * 然后通过串行端口将速度数据发送到 STM32。
  */
 void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
@@ -112,11 +112,11 @@ void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 }
 
 /**
- * @brief Send velocity feedback to STM32 via serial port (Frame ID: 0x32)
- * @param transformed_velocity Velocity in body frame (m/s)
+ * @brief 通过串行端口发送速度反馈到 STM32（帧 ID: 0x32）
+ * @param transformed_velocity 机体坐标系中的速度（m/s）
  * 
- * Scales velocity by 100 and sends as int16 values in cm/s.
- * This is velocity feedback for the flight controller, not a control command.
+ * 将速度缩放 100 倍并作为 int16 值以 cm/s 为单位发送。
+ * 这是飞控的速度反馈，不是控制指令。
  */
 void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_velocity)
 {
@@ -154,11 +154,11 @@ void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_veloc
 }
 
 /**
- * @brief Target velocity callback - receives velocity commands from PID controller
- * @param msg Target velocity command [vx_cm/s, vy_cm/s, vz_cm/s, vyaw_deg/s]
+ * @brief 目标速度回调 - 接收来自 PID 控制器的速度指令
+ * @param msg 目标速度指令 [vx_cm/s, vy_cm/s, vz_cm/s, vyaw_deg/s]
  * 
- * This is the main control command entry point. Extracts velocity components
- * and forwards them to STM32 via serial port.
+ * 这是主要的控制指令入口点。提取速度分量
+ * 并通过串行端口转发到 STM32。
  */
 void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
 {
@@ -182,15 +182,15 @@ void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray:
 }
 
 /**
- * @brief Send target velocity command to STM32 (Frame ID: 0x31)
- * @param vx_cm_per_s X-axis velocity command (cm/s)
- * @param vy_cm_per_s Y-axis velocity command (cm/s)
- * @param vz_cm_per_s Z-axis velocity command (cm/s)
- * @param vyaw_deg_per_s Yaw angular velocity command (deg/s)
+ * @brief 发送目标速度指令到 STM32（帧 ID: 0x31）
+ * @param vx_cm_per_s X 轴速度指令（cm/s）
+ * @param vy_cm_per_s Y 轴速度指令（cm/s）
+ * @param vz_cm_per_s Z 轴速度指令（cm/s）
+ * @param vyaw_deg_per_s 偏航角速度指令（deg/s）
  * 
- * Converts float velocity commands to int16 and sends to STM32.
- * Note: This function sends the values directly without any coordinate transformation.
- * Coordinate transformation (Map -> Body) should be done by the PID controller before publishing.
+ * 将浮点速度指令转换为 int16 并发送到 STM32。
+ * 注意：此函数直接发送值，不进行任何坐标变换。
+ * 坐标变换（地图坐标系 -> 机体坐标系）应由 PID 控制器在发布前完成。
  */
 void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_s, float vz_cm_per_s, float vyaw_deg_per_s)
 {
@@ -230,14 +230,14 @@ void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_
 }
 
 /**
- * @brief Protocol data handler - parses incoming data from STM32
- * @param id Protocol frame ID
- * @param data Protocol frame data
+ * @brief 协议数据处理 - 解析来自 STM32 的输入数据
+ * @param id 协议帧 ID
+ * @param data 协议帧数据
  * 
- * Handles the following protocol frames:
- * - 0xF1 (ST_READY_QUERY_ID): ST ready query/response
- * - 0x05 (HEIGHT_FRAME_ID): Height data from barometer/lidar
- * - 0xB1: Target velocity feedback from flight controller
+ * 处理以下协议帧：
+ * - 0xF1 (ST_READY_QUERY_ID): ST 就绪查询/响应
+ * - 0x05 (HEIGHT_FRAME_ID): 来自气压计/激光雷达的高度数据
+ * - 0xB1: 飞控的目标速度反馈
  */
 void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & data)
 {
@@ -300,10 +300,10 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
 }
 
 /**
- * @brief Send A2 ready response to STM32 (Frame ID: 0xA2)
+ * @brief 发送 A2 就绪响应到 STM32（帧 ID: 0xA2）
  * 
- * Responds to ST ready query (0xF1) when STM32 is ready.
- * Sends a 9-byte response with first byte set to 0x01.
+ * 当 STM32 就绪时响应 ST 就绪查询（0xF1）。
+ * 发送 9 字节响应，第一个字节设置为 0x01。
  */
 void UartToStm32::sendA2ReadyResponse()
 {
