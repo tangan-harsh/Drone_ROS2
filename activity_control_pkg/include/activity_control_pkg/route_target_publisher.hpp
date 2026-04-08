@@ -83,12 +83,12 @@ public:
 
   /**
    * @brief 加载预定义航点序列
-   * @param preset_name 预设名称 ("test_19", "simple_5", "none")
+   * @param preset_name 预设名称 ("test_19", "simple_4", "none")
    * @return true 加载成功，false 未知预设名称
    * 
    * 支持的预设：
    * - "test_19": 19 个测试航点（起飞、水平飞行、旋转、降落）
-   * - "simple_5": 5 个简单航点（快速测试用）
+   * - "simple_4": 4 个简单航点（快速测试用）
    * - "none": 不加载任何预设航点
    */
   bool loadPresetWaypoints(const std::string & preset_name);
@@ -220,51 +220,6 @@ public:
   std::string map_frame_;                                                            ///< 地图坐标系名称，默认 "map"
   std::string laser_link_frame_;                                                     ///< 激光雷达坐标系名称，默认 "laser_link"
   std::string output_topic_;                                                         ///< 目标位置话题名称，默认 "/target_position"
-};
-
-/**
- * @class RouteTestNode
- * @brief 航点测试节点
- * 
- * 用途：自动生成测试航点序列，验证航点执行功能
- * 
- * 功能：
- * 1. 启动时自动添加首个航点（起飞）
- * 2. 每秒添加一个预设航点
- * 3. 共 19 个航点，包含：
- *    - 起飞/降落
- *    - 水平飞行
- *    - 高度变化
- *    - 偏航旋转
- * 
- * 测试流程：
- *   启动 → 添加航点 1(起飞) → 每秒添加下一个 → 添加完毕 (19 个)
- */
-class RouteTestNode : public rclcpp::Node
-{
-public:
-  /**
-   * @brief 构造函数
-   * @param route_node 航点发布节点指针
-   * @param options ROS2 节点选项
-   */
-  explicit RouteTestNode(
-    const std::shared_ptr<RouteTargetPublisherNode> & route_node,
-    const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
-
-private:
-  /**
-   * @brief 定时器回调：添加预设航点
-   * 
-   * 从预定义的航点数组中按顺序添加，共 19 个航点
-   */
-  void addTimerCallback();
-
-  std::shared_ptr<RouteTargetPublisherNode> route_node_;                             ///< 航点发布节点指针
-  rclcpp::TimerBase::SharedPtr add_timer_;                                           ///< 添加航点定时器 (1Hz)
-
-  bool started_;                                                                     ///< 是否已启动
-  int next_target_index_;                                                            ///< 下一个要添加的航点索引
 };
 
 }  // namespace activity_control_pkg

@@ -7,7 +7,6 @@
  * 2. 位姿获取：通过 TF 获取机器人当前位置和姿态
  * 3. 到达判断：基于位置、高度、偏航角容差判断是否到达
  * 4. 自动切换：到达后自动发布下一个航点
- * 5. 控制信号：发布控制器激活信号（无人机/小车模式）
  * 
  * 系统架构：
  * 
@@ -20,7 +19,6 @@
  *   │                                                         │
  *   │  输出：                                                  │
  *   │    - /target_position (发布) 目标位置 [x,y,z,yaw]         │
- *   │    - /active_controller (发布) 控制器激活信号              │
  *   │                                                         │
  *   │  核心流程：                                               |
  *   │    getCurrentPose() → isReached() → publishTarget()     │ 
@@ -41,7 +39,6 @@
 #include <limits>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
-#include <std_msgs/msg/u_int8.hpp>
 #include <tf2/exceptions.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
@@ -82,8 +79,7 @@ RouteTargetPublisherNode::RouteTargetPublisherNode(const rclcpp::NodeOptions & o
   // 4. 创建发布者 (使用 transient_local QoS，保证新节点能收到最后一条消息)
   auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
   target_pub_ = create_publisher<std_msgs::msg::Float32MultiArray>(output_topic_, qos);
-  active_controller_pub_ = create_publisher<std_msgs::msg::UInt8>(
-    "/active_controller", qos);  // 对 STM32 发送应答帧的判断符
+
   
   // 5. 创建订阅者
   height_sub_ = create_subscription<std_msgs::msg::Int16>(
@@ -152,7 +148,7 @@ std::size_t RouteTargetPublisherNode::size() const
 
 /**
  * @brief 加载预定义航点序列
- * @param preset_name 预设名称 ("test_19", "simple_5", "none")
+ * @param preset_name 预设名称 ("test_19", "simple_4", "none")
  * @return true 加载成功，false 未知预设名称
  */
 bool RouteTargetPublisherNode::loadPresetWaypoints(const std::string & preset_name)
@@ -179,12 +175,11 @@ bool RouteTargetPublisherNode::loadPresetWaypoints(const std::string & preset_na
     {280.0, -380.0, 4.0, 180.0},      // 19: 降落
   }};
 
-  static constexpr std::array<Target, 5> kSimple5Waypoints = {{
-    {0.0, 0.0, 100.0, 0.0},           // 1: 起飞
-    {50.0, 0.0, 100.0, 0.0},          // 2: X+ 飞行
-    {50.0, 50.0, 100.0, 0.0},         // 3: Y+ 飞行
-    {0.0, 50.0, 100.0, 90.0},         // 4: 旋转
-    {0.0, 0.0, 0.0, 90.0},            // 5: 降落
+  static constexpr std::array<Target, 4> kSimple4Waypoints = {{
+    {0.0, 0.0, 50.0, 0.0},           // 1: 起飞
+    {50.0, 0.0, 50.0, 0.0},          // 2: X+ 飞行
+    {50.0, 50.0, 50.0, 0.0},         // 3: Y+ 飞行
+    {0.0, 0.0, 3.0, 0.0},            // 4: 降落
   }};
 
   if (preset_name == "test_19") {
@@ -196,12 +191,12 @@ bool RouteTargetPublisherNode::loadPresetWaypoints(const std::string & preset_na
     return true;
   }
 
-  if (preset_name == "simple_5") {
-    for (const auto & wp : kSimple5Waypoints) {
+  if (preset_name == "simple_4") {
+    for (const auto & wp : kSimple4Waypoints) {
       addTarget(wp);
     }
     RCLCPP_INFO(get_logger(), "Loaded %zu waypoints from preset '%s'", 
-                kSimple5Waypoints.size(), preset_name.c_str());
+                kSimple4Waypoints.size(), preset_name.c_str());
     return true;
   }
 
@@ -231,11 +226,10 @@ void RouteTargetPublisherNode::publishCurrent()
 }
 
 /**
- * @brief 发布目标位置和控制信号
+ * @brief 发布目标位置
  * 
  * 发布内容：
  * 1. /target_position: Float32MultiArray[x_cm, y_cm, z_cm, yaw_deg]
- * 2. /active_controller: UInt8(2=无人机模式)
  * 
  * @param target 目标航点
  * @param init_flag 是否为首个航点
@@ -251,12 +245,8 @@ void RouteTargetPublisherNode::publishTarget(const Target & target, bool init_fl
   message.data[3] = static_cast<float>(target.yaw_deg);
   target_pub_->publish(message);
 
-  // 2. 发布控制器激活信号 (2=无人机模式)
-  std_msgs::msg::UInt8 active_msg;
-  active_msg.data = 2;  // Drone
-  active_controller_pub_->publish(active_msg);
 
-  // 3. 打印日志
+  // 2. 打印日志
   RCLCPP_INFO(
     get_logger(),
     "发布目标：x=%.1fcm y=%.1fcm z=%.1fcm yaw=%.1fdeg%s",
@@ -405,9 +395,6 @@ void RouteTargetPublisherNode::monitorTimerCallback()
   if (current_idx_ != std::numeric_limits<std::size_t>::max() &&
     current_idx_ >= targets_.size())
   {
-    std_msgs::msg::UInt8 active_msg;
-    active_msg.data = 3;  // Drone Stop
-    active_controller_pub_->publish(active_msg);
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
       "所有目标已完成，持续发送停止信号 (3)");
@@ -440,14 +427,9 @@ void RouteTargetPublisherNode::monitorTimerCallback()
     current_idx_++;
     if (current_idx_ < targets_.size()) {
       publishCurrent();  // 发布新目标
-    } else {
-      current_idx_ = targets_.size();
-      RCLCPP_INFO(get_logger(), "所有目标已完成");
-      std_msgs::msg::UInt8 active_msg;
-      active_msg.data = 3;  // Drone Stop
-      active_controller_pub_->publish(active_msg);
+      } 
     }
-  }
+  
 }
 
 /**
@@ -486,137 +468,6 @@ double RouteTargetPublisherNode::normalizeAngleDeg(double angle_deg) const
 {
   const double normalized = angles::normalize_angle(angles::from_degrees(angle_deg));
   return angles::to_degrees(normalized);
-}
-
-// ==================== RouteTestNode 实现 ====================
-
-/**
- * @brief 构造函数
- * 
- * 初始化流程：
- * 1. 创建定时器（1Hz）
- * 2. 添加首个航点（起飞：0,0,130cm,0°）
- * 3. 启动定时器
- * 
- * @param route_node 航点发布节点指针
- * @param options ROS2 节点选项
- */
-RouteTestNode::RouteTestNode(
-  const std::shared_ptr<RouteTargetPublisherNode> & route_node,
-  const rclcpp::NodeOptions & options)
-: rclcpp::Node("route_test_node", options),
-  route_node_(route_node),
-  started_(false),
-  next_target_index_(1)
-{
-  std::setlocale(LC_ALL, "");
-  
-  // 1. 创建定时器（每秒添加一个航点）
-  add_timer_ = create_wall_timer(
-    std::chrono::seconds(1),
-    std::bind(&RouteTestNode::addTimerCallback, this));
-  add_timer_->cancel();  // 先暂停，添加首个航点后再启动
-
-  RCLCPP_INFO(get_logger(), "Route test node 启动，自动添加第一个航点...");
-
-  // 2. 添加首个航点（起飞）
-  Target first{0.0, 0.0, 130.0, 0.0};
-  route_node_->addTarget(first);
-
-  const auto current = route_node_->currentIndex();
-  RCLCPP_INFO(
-    get_logger(),
-    "添加首个目标：x=%.1f y=%.1f z=%.1f yaw=%.1f | 当前第 %zu 个目标",
-    first.x_cm, first.y_cm, first.z_cm, first.yaw_deg,
-    (current == std::numeric_limits<std::size_t>::max() ? 0 : current + 1));
-
-  // 3. 启动定时器
-  add_timer_->reset();
-  started_ = true;
-}
-
-/**
- * @brief 添加预设航点定时器回调
- * 
- * 预设航点序列（共 19 个）：
- * 
- * | 序号 | X(cm)  | Y(cm)  | Z(cm) | Yaw(°) | 动作说明      |
- * |------|--------|--------|-------|--------|---------------|
- * | 1    | 0      | 0      | 130   | 0      | 起飞          |
- * | 2    | 103    | -145   | 130   | 0      | 水平飞行      |
- * | 3    | 153    | -145   | 130   | 0      | 水平飞行      |
- * | 4    | 203    | -145   | 130   | 0      | 水平飞行      |
- * | 5    | 203    | -145   | 83    | 0      | 下降          |
- * | 6    | 153    | -145   | 83    | 0      | 水平飞行      |
- * | 7    | 103    | -145   | 83    | 0      | 水平飞行      |
- * | 8    | -30    | -145   | 83    | 0      | 长距离飞行    |
- * | 9    | -30    | -260   | 83    | 0      | 水平飞行      |
- * | 10   | -30    | -260   | 83    | 90     | 原地旋转 90°  |
- * | 11   | -30    | -260   | 83    | 180    | 原地旋转 180° |
- * | 12   | 103    | -260   | 83    | 180    | 水平飞行      |
- * | 13   | 153    | -260   | 83    | 180    | 水平飞行      |
- * | 14   | 203    | -260   | 83    | 180    | 水平飞行      |
- * | 15   | 203    | -260   | 130   | 180    | 上升          |
- * | 16   | 153    | -260   | 130   | 180    | 水平飞行      |
- * | 17   | 103    | -260   | 130   | 180    | 水平飞行      |
- * | 18   | 280    | -380   | 130   | 180    | 长距离飞行    |
- * | 19   | 280    | -380   | 4     | 180    | 降落          |
- * 
- * 测试覆盖：
- * ✅ 起飞/降落
- * ✅ 水平飞行（X/Y轴）
- * ✅ 高度变化（上升/下降）
- * ✅ 偏航旋转（90°/180°）
- * ✅ 长距离飞行
- */
-void RouteTestNode::addTimerCallback()
-{
-  if (!started_) {
-    return;
-  }
-  
-  // 预定义航点数组
-  static constexpr std::array<Target, 19> kWaypoints = {{
-    {0.0, 0.0, 130.0, 0.0},           // 1: 起飞
-    {103.0, -145.0, 130.0, 0.0},      // 2
-    {153.0, -145.0, 130.0, 0.0},      // 3
-    {203.0, -145.0, 130.0, 0.0},      // 4
-    {203.0, -145.0, 83.0, 0.0},       // 5: 下降
-    {153.0, -145.0, 83.0, 0.0},       // 6
-    {103.0, -145.0, 83.0, 0.0},       // 7
-    {-30.0, -145.0, 83.0, 0.0},       // 8
-    {-30.0, -260.0, 83.0, 0.0},       // 9
-    {-30.0, -260.0, 83.0, 90.0},      // 10: 旋转 90
-    {-30.0, -260.0, 83.0, 180.0},     // 11: 旋转 180
-    {103.0, -260.0, 83.0, 180.0},     // 12
-    {153.0, -260.0, 83.0, 180.0},     // 13
-    {203.0, -260.0, 83.0, 180.0},     // 14
-    {203.0, -260.0, 130.0, 180.0},    // 15: 上升
-    {153.0, -260.0, 130.0, 180.0},    // 16
-    {103.0, -260.0, 130.0, 180.0},    // 17
-    {280.0, -380.0, 130.0, 180.0},    // 18
-    {280.0, -380.0, 4.0, 180.0},      // 19: 降落
-  }};
-
-  // 按顺序添加航点
-  if (next_target_index_ <= static_cast<int>(kWaypoints.size())) {
-    const Target & target = kWaypoints[next_target_index_ - 1];
-    route_node_->addTarget(target);
-
-    const auto current = route_node_->currentIndex();
-    RCLCPP_INFO(
-      get_logger(),
-      "追加目标 idx=%d: x=%.1f y=%.1f z=%.1f yaw=%.1f | 当前第 %zu 个目标",
-      next_target_index_,
-      target.x_cm, target.y_cm, target.z_cm, target.yaw_deg,
-      (current == std::numeric_limits<std::size_t>::max() ? 0 : current + 1));
-
-    ++next_target_index_;
-  } else {
-    // 所有航点添加完毕
-    add_timer_->cancel();
-    RCLCPP_INFO(get_logger(), "预设目标全部添加完毕");
-  }
 }
 
 }  // namespace activity_control_pkg

@@ -26,7 +26,7 @@ def generate_launch_description():
                     "position_tolerance_cm": 6.0,
                     "yaw_tolerance_deg": 5.0,
                     "height_tolerance_cm": 6.0,
-                    "waypoint_preset": "simple_5",  # Options: "test_19", "simple_5", "none"
+                    "waypoint_preset": "simple_4",  # Options: "test_19", "simple_4", "none"
                 }
             ],
         )

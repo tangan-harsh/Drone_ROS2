@@ -38,10 +38,6 @@ add_executable(route_target_publisher_node src/route_target_publisher_main.cpp)
 target_link_libraries(route_target_publisher_node route_target_publisher)
 ament_target_dependencies(route_target_publisher_node rclcpp)
 
-add_executable(route_test_node src/route_test_node.cpp)
-target_link_libraries(route_test_node route_target_publisher)
-ament_target_dependencies(route_test_node rclcpp)
-
 install(TARGETS route_target_publisher
   EXPORT export_route_target_publisher
   ARCHIVE DESTINATION lib
@@ -51,7 +47,6 @@ install(TARGETS route_target_publisher
 
 install(TARGETS
   route_target_publisher_node
-  route_test_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
