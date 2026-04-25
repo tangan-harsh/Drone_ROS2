@@ -4,11 +4,13 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <mutex>
 
 #include <Eigen/Dense>
 
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <quadrotor_msgs/msg/position_command.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/int16.hpp>
 #include <std_msgs/msg/u_int8.hpp>
@@ -68,6 +70,8 @@ private:
    */
   void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
 
+  void droneCommandCallback(const std_msgs::msg::UInt8::SharedPtr msg);
+
   /**
    * @brief 目标速度回调函数
    * @param msg 来自 PID 控制器的目标速度指令
@@ -76,9 +80,16 @@ private:
   void targetVelocityCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg);
 
   /**
-   * @brief 通过串行端口发送速度数据到 STM32
-   * @param transformed_velocity 机体坐标系中的速度（m/s）
-   * @details 将速度缩放 100 倍并作为 int16 值发送（cm/s）
+   * @brief EGO 目标速度回调函数
+   * @param msg 来自 EGO 规划器的位置控制指令
+   * @details 从 /position_cmd 中提取速度和 yaw_dot，并发送到 STM32
+   */
+  void ego_targetVelocityCallback(const quadrotor_msgs::msg::PositionCommand::SharedPtr msg);
+
+  /**
+   * @brief 速度来源回调函数
+   * @param msg 速度来源标识
+   * @details 接收 /speed_source 并转发到 STM32（帧 ID: 0x34）
    */
   void sendVelocityToSerial(const Eigen::Vector3d & transformed_velocity);
 
@@ -114,8 +125,16 @@ private:
   /// 里程计订阅者
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
 
+  rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr drone_command_sub_;
+
   /// 目标速度订阅者
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr target_velocity_sub_;
+
+  /// EGO 位置控制命令订阅者
+  rclcpp::Subscription<quadrotor_msgs::msg::PositionCommand>::SharedPtr position_cmd_sub_;
+
+  /// 速度来源订阅者
+  rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr speed_source_sub_;
 
   /// 串行通信接口
   std::unique_ptr<serial_comm::SerialComm> serial_comm_;
@@ -129,6 +148,8 @@ private:
   /// 任务步骤发布者
   rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr mission_step_pub_;
 
+  uint8_t drone_command_ = 0;
+
   /// 标志表示是否已发布 ST 就绪状态
   bool has_st_ready_pub_;
 
@@ -141,7 +162,19 @@ private:
   /// 日志节流间隔（毫秒）
   int log_throttle_interval_;
 
-  // Protocol frame IDs
+  /// 目标速度输入来源选择：true=/target_velocity, false=/position_cmd
+  bool use_target_velocity_topic_;
+
+  /// Latest yaw from odometry (rad), used for world->body conversion.
+  double current_yaw_rad_{0.0};
+
+  /// Whether odometry yaw has been received at least once.
+  bool has_odom_{false};
+
+  /// Protect shared yaw state across callbacks.
+  std::mutex odom_mutex_;
+
+  // Protocol frame IDs 
   static constexpr uint8_t VELOCITY_FRAME_ID = 0x32;
   static constexpr uint8_t TARGET_VELOCITY_FRAME_ID = 0x31;
   static constexpr uint8_t HEIGHT_FRAME_ID = 0x05;
@@ -152,6 +185,7 @@ private:
   static constexpr char DEFAULT_SERIAL_PORT[] = "/dev/ttyS4";
   static constexpr int DEFAULT_BAUD_RATE = 115200;
   static constexpr int DEFAULT_LOG_THROTTLE_INTERVAL = 2000;
+  static constexpr bool DEFAULT_USE_TARGET_VELOCITY_TOPIC = true;
 };
 
 }  // namespace uart_to_stm32

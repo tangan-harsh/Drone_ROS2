@@ -18,7 +18,8 @@ UartToStm32::UartToStm32(rclcpp::Node::SharedPtr node)
   has_st_ready_pub_(false),
   serial_port_(DEFAULT_SERIAL_PORT),
   baud_rate_(DEFAULT_BAUD_RATE),
-  log_throttle_interval_(DEFAULT_LOG_THROTTLE_INTERVAL)
+  log_throttle_interval_(DEFAULT_LOG_THROTTLE_INTERVAL),
+  use_target_velocity_topic_(DEFAULT_USE_TARGET_VELOCITY_TOPIC)
 {
   RCLCPP_INFO(node_->get_logger(), "UartToStm32 created");
 }
@@ -37,6 +38,8 @@ bool UartToStm32::initialize()
     serial_port_ = node_->declare_parameter<std::string>("serial_port", DEFAULT_SERIAL_PORT);
     baud_rate_ = node_->declare_parameter<int>("baud_rate", DEFAULT_BAUD_RATE);
     log_throttle_interval_ = node_->declare_parameter<int>("log_throttle_interval", DEFAULT_LOG_THROTTLE_INTERVAL);
+    use_target_velocity_topic_ = node_->declare_parameter<bool>(
+      "use_target_velocity_topic", DEFAULT_USE_TARGET_VELOCITY_TOPIC);
 
     RCLCPP_INFO(node_->get_logger(), "Serial configuration: port=%s, baud_rate=%d",
                 serial_port_.c_str(), baud_rate_);
@@ -52,17 +55,30 @@ bool UartToStm32::initialize()
                 serial_port_.c_str(), baud_rate_);
 
     odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
-      "/a/Odometry", 10,
+      "Odom_high_fre", 10,
       std::bind(&UartToStm32::odometryCallback, this, std::placeholders::_1));
 
-    target_velocity_sub_ = node_->create_subscription<std_msgs::msg::Float32MultiArray>(
-      "/target_velocity", 10,
-      std::bind(&UartToStm32::targetVelocityCallback, this, std::placeholders::_1));
+    drone_command_sub_ = node_->create_subscription<std_msgs::msg::UInt8>(
+  "/drone_command", 10,
+  std::bind(&UartToStm32::droneCommandCallback, this, std::placeholders::_1));
 
-    height_pub_ = node_->create_publisher<std_msgs::msg::Int16>("/height", 10);
+    if (use_target_velocity_topic_) {//pid_control_pkg给的速度
+      target_velocity_sub_ = node_->create_subscription<std_msgs::msg::Float32MultiArray>(
+        "target_velocity", 10,
+        std::bind(&UartToStm32::targetVelocityCallback, this, std::placeholders::_1));
+      RCLCPP_INFO(node_->get_logger(), "Using /target_velocity (Float32MultiArray) as target input");
+    } else {//ego给的速度
+      position_cmd_sub_ = node_->create_subscription<quadrotor_msgs::msg::PositionCommand>(
+        "pos_cmd", 10,
+        std::bind(&UartToStm32::ego_targetVelocityCallback, this, std::placeholders::_1));
+      RCLCPP_INFO(node_->get_logger(), "/pos_cmd (PositionCommand) as target input");
+    }
+    
+
+    height_pub_ = node_->create_publisher<std_msgs::msg::Int16>("height", 10);
     is_st_ready_pub_ = node_->create_publisher<std_msgs::msg::UInt8>(
-      "/is_st_ready", rclcpp::QoS(10).transient_local());
-    mission_step_pub_ = node_->create_publisher<std_msgs::msg::UInt8>("/mission_step", 10);
+      "is_st_ready", rclcpp::QoS(10).transient_local());
+    mission_step_pub_ = node_->create_publisher<std_msgs::msg::UInt8>("mission_step", 10);
 
     serial_comm_->start_protocol_receive(
       [this](uint8_t id, const std::vector<uint8_t> & data) { protocolDataHandler(id, data); },
@@ -71,7 +87,7 @@ bool UartToStm32::initialize()
       });
 
     RCLCPP_INFO(node_->get_logger(), "UartToStm32 initialized successfully");
-    RCLCPP_INFO(node_->get_logger(), "Subscribed to /a/Odometry and /target_velocity topics");
+    RCLCPP_INFO(node_->get_logger(), "Subscribed to /a/Odometry and /speed_source topics");
     return true;
 
   } catch (const std::exception & e) {
@@ -84,8 +100,9 @@ bool UartToStm32::initialize()
  * @brief 里程计回调 - 接收来自 DCL-SLAM 的里程计数据
  * @param msg 包含位姿和速度的里程计消息
  * 
- * 从里程计消息中提取线速度和偏航角，
- * 然后通过串行端口将速度数据发送到 STM32。
+ * 从里程计消息中提取线速度和偏航角。
+ * 里程计线速度按世界坐标系解释，并在此处转换到机体坐标系后
+ * 通过串行端口将速度反馈发送到 STM32。
  */
 void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
@@ -102,14 +119,37 @@ void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
   const double angular_y = msg->twist.twist.angular.y;
   const double angular_z = msg->twist.twist.angular.z;
 
+  // RCLCPP_INFO_THROTTLE(
+  //   node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+  //   "Odometry: linear(%.3f, %.3f, %.3f) angular(%.3f, %.3f, %.3f) yaw=%.2f deg",
+  //   linear_x, linear_y, linear_z, angular_x, angular_y, angular_z, yaw * 180.0 / M_PI);
+
+  {
+    std::lock_guard<std::mutex> lock(odom_mutex_);
+    current_yaw_rad_ = yaw;
+    has_odom_ = true;
+  }
+
+  // Treat odometry twist as world-frame velocity and convert to body frame.
+  const double vel_body_x = linear_x * std::cos(yaw) + linear_y * std::sin(yaw);
+  const double vel_body_y = -linear_x * std::sin(yaw) + linear_y * std::cos(yaw);
+  const double vel_body_z = linear_z;
+
+  Eigen::Vector3d body_vel(linear_x, linear_y, linear_z);
+  // Eigen::Vector3d body_vel(vel_body_x, vel_body_y, vel_body_z);
+  sendVelocityToSerial(body_vel);
+}
+
+void UartToStm32::droneCommandCallback(const std_msgs::msg::UInt8::SharedPtr msg)
+{
+
+  drone_command_ = msg->data;
+
   RCLCPP_INFO_THROTTLE(
     node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
-    "Odometry: linear(%.3f, %.3f, %.3f) angular(%.3f, %.3f, %.3f) yaw=%.2f deg",
-    linear_x, linear_y, linear_z, angular_x, angular_y, angular_z, yaw * 180.0 / M_PI);
-
-    Eigen::Vector3d body_vel(linear_x, linear_y, linear_z);
-    sendVelocityToSerial(body_vel);
+    "Drone Command: %d", drone_command_);
 }
+
 
 /**
  * @brief 通过串行端口发送速度反馈到 STM32（帧 ID: 0x32）
@@ -181,6 +221,57 @@ void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray:
   sendTargetVelocityToSerial(vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
 }
 
+void UartToStm32::ego_targetVelocityCallback(const quadrotor_msgs::msg::PositionCommand::SharedPtr msg)
+{
+  double yaw_rad = 0.0;
+  {
+    std::lock_guard<std::mutex> lock(odom_mutex_);
+    if (!has_odom_) {
+      RCLCPP_WARN_THROTTLE(
+        node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+        "No odom yaw yet, suppress XY command for safety");
+      const float vz_cm_per_s = static_cast<float>(msg->velocity.z * 100.0);
+      const float vyaw_deg_per_s = static_cast<float>(msg->yaw_dot * 180.0 / M_PI);
+      sendTargetVelocityToSerial(0.0F, 0.0F, vz_cm_per_s, vyaw_deg_per_s);
+      return;
+    }
+    yaw_rad = current_yaw_rad_;
+  }
+
+  const double vx_world = msg->velocity.x;
+  const double vy_world = msg->velocity.y;
+  const double vz_world = msg->velocity.z;
+
+  // world/map -> body conversion using latest odometry yaw.
+  const double vx_body = vx_world * std::cos(yaw_rad) + vy_world * std::sin(yaw_rad);
+  const double vy_body = -vx_world * std::sin(yaw_rad) + vy_world * std::cos(yaw_rad);
+  const double vz_body = vz_world;
+
+  // const float vx_cm_per_s = static_cast<float>(vx_world * 100.0);
+  // const float vy_cm_per_s = static_cast<float>(vy_world * 100.0);
+  // const float vz_cm_per_s = static_cast<float>(vz_world * 100.0);
+
+  const float vx_cm_per_s = static_cast<float>(vx_body * 100.0);
+  const float vy_cm_per_s = static_cast<float>(vy_body * 100.0);
+  const float vz_cm_per_s = static_cast<float>(vz_body * 100.0);
+
+  const float vyaw_deg_per_s = static_cast<float>(msg->yaw_dot * 180.0 / M_PI);
+
+  // RCLCPP_INFO_THROTTLE(
+  //   node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+  //   "EGO Target Velocity: linear(%.1f, %.1f, %.1f) angular(%.1f)",
+  //   vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
+  // RCLCPP_INFO_THROTTLE(
+  //   node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+  //   "EGO Target Velocity(body): linear(%.1f, %.1f, %.1f) angular(%.1f)",
+  //   vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
+
+
+  sendTargetVelocityToSerial(vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
+}
+
+
+
 /**
  * @brief 发送目标速度指令到 STM32（帧 ID: 0x31）
  * @param vx_cm_per_s X 轴速度指令（cm/s）
@@ -189,8 +280,8 @@ void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray:
  * @param vyaw_deg_per_s 偏航角速度指令（deg/s）
  * 
  * 将浮点速度指令转换为 int16 并发送到 STM32。
- * 注意：此函数直接发送值，不进行任何坐标变换。
- * 坐标变换（地图坐标系 -> 机体坐标系）应由 PID 控制器在发布前完成。
+ * 注意：此函数直接发送值，不进行坐标变换。
+ * 对于 /pos_cmd 输入，world/map -> body 的变换在 ego_targetVelocityCallback() 内完成。
  */
 void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_s, float vz_cm_per_s, float vyaw_deg_per_s)
 {
@@ -259,6 +350,8 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
         break;
       }
       const uint8_t second = data[1];
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+        "Received 0xF1 frame: second=%u", static_cast<unsigned>(second));
       if (second == 1) {
         if (is_st_ready_pub_) {
           std_msgs::msg::UInt8 msg;
@@ -266,6 +359,11 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
           is_st_ready_pub_->publish(msg);
           RCLCPP_INFO(node_->get_logger(), "Published /is_st_ready: 1 (from 0xF1 frame)");
         }
+        // if(!drone_command_){
+        //   break;
+        // }
+        sendA2ReadyResponse();
+        sendA2ReadyResponse();
         sendA2ReadyResponse();
         has_st_ready_pub_ = true;
       } else {

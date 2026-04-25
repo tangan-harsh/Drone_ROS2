@@ -70,7 +70,7 @@ RouteTargetPublisherNode::RouteTargetPublisherNode(const rclcpp::NodeOptions & o
   // 2. 加载坐标系配置
   map_frame_ = declare_parameter("map_frame", "a/camera_init");
   laser_link_frame_ = declare_parameter("laser_link_frame", "a/body");
-  output_topic_ = declare_parameter("output_topic", "/target_position");
+  output_topic_ = declare_parameter("output_topic", "target_position");
 
   // 3. 初始化 TF 监听器
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
@@ -83,7 +83,7 @@ RouteTargetPublisherNode::RouteTargetPublisherNode(const rclcpp::NodeOptions & o
   
   // 5. 创建订阅者
   height_sub_ = create_subscription<std_msgs::msg::Int16>(
-    "/height", rclcpp::QoS(10),
+    "height", rclcpp::QoS(10),
     std::bind(&RouteTargetPublisherNode::heightCallback, this, std::placeholders::_1));
 
   // 6. 创建监控定时器 (20Hz = 50ms)

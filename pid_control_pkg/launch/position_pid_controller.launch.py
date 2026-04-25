@@ -1,14 +1,25 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description() -> LaunchDescription:
+    namespace = LaunchConfiguration("namespace", default="a")
+    drone_id = LaunchConfiguration("drone_id", default="0")
+    namespace_arg = DeclareLaunchArgument(
+        "namespace", default_value=namespace, description="Namespace for the drone"
+    )
+    drone_id_arg = DeclareLaunchArgument("drone_id",default_value=drone_id,description="Drone ID")
     return LaunchDescription([
+        namespace_arg,
+        drone_id_arg,
         Node(
             package="pid_control_pkg",
             executable="position_pid_controller",
             name="position_pid_controller",
             output="screen",
+            namespace=namespace,
             parameters=[
                 {
                     "control_frequency": 50.0,

@@ -11,6 +11,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(quadrotor_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(serial_comm REQUIRED)
 
@@ -31,6 +32,7 @@ ament_target_dependencies(uart_to_stm32_node
   std_msgs
   serial_comm
   nav_msgs
+  quadrotor_msgs
 )
 
 install(TARGETS uart_to_stm32_node
@@ -54,6 +56,7 @@ ament_export_dependencies(
   geometry_msgs
   std_msgs
   serial_comm
+  quadrotor_msgs
 )
 
 ament_package()

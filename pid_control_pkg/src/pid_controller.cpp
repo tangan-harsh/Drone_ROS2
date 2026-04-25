@@ -162,16 +162,16 @@ PositionPIDController::PositionPIDController()
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
   target_position_sub_ = create_subscription<std_msgs::msg::Float32MultiArray>(
-    "/target_position", rclcpp::QoS(10),
+    "target_position", rclcpp::QoS(10),
     std::bind(&PositionPIDController::targetPositionCallback, this, std::placeholders::_1));
 
 
   height_sub_ = create_subscription<std_msgs::msg::Int16>(
-    "/height", rclcpp::QoS(10),
+    "height", rclcpp::QoS(10),
     std::bind(&PositionPIDController::heightCallback, this, std::placeholders::_1));
 
   target_velocity_pub_ = create_publisher<std_msgs::msg::Float32MultiArray>(
-    "/target_velocity", rclcpp::QoS(10));
+    "target_velocity", rclcpp::QoS(10));
 
   const double period_sec = 1.0 / std::max(control_frequency_, 1.0);
   control_timer_ = create_wall_timer(
