@@ -54,8 +54,9 @@ bool UartToStm32::initialize()
     RCLCPP_INFO(node_->get_logger(), "Serial port %s initialized at %d baudrate",
                 serial_port_.c_str(), baud_rate_);
 
+    auto odom_qos = rclcpp::QoS(1).best_effort();
     odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
-      "Odom_high_fre", 10,
+      "Odometry", odom_qos,
       std::bind(&UartToStm32::odometryCallback, this, std::placeholders::_1));
 
     drone_command_sub_ = node_->create_subscription<std_msgs::msg::UInt8>(
@@ -86,6 +87,23 @@ bool UartToStm32::initialize()
         RCLCPP_WARN(node_->get_logger(), "Serial protocol error: %s", err.c_str());
       });
 
+    // --- Timer-driven velocity feedback (decoupled from DDS callbacks) ---
+    stale_timeout_sec_ = node_->declare_parameter<double>("stale_timeout_s", 0.2);
+    zero_on_stale_ = node_->declare_parameter<bool>("zero_on_stale", true);
+    if (stale_timeout_sec_ < 0.05) stale_timeout_sec_ = 0.05;
+    if (stale_timeout_sec_ > 1.0)  stale_timeout_sec_ = 1.0;
+
+    velocity_timer_ = node_->create_wall_timer(
+      std::chrono::milliseconds(20),  // 50 Hz
+      std::bind(&UartToStm32::velocityTimerCallback, this));
+
+    param_callback_handle_ = node_->add_on_set_parameters_callback(
+      std::bind(&UartToStm32::onParameterChange, this, std::placeholders::_1));
+
+    RCLCPP_INFO(node_->get_logger(),
+      "Velocity feedback timer started at 50 Hz (stale_timeout=%.2f s, zero_on_stale=%s)",
+      stale_timeout_sec_, zero_on_stale_ ? "true" : "false");
+
     RCLCPP_INFO(node_->get_logger(), "UartToStm32 initialized successfully");
     RCLCPP_INFO(node_->get_logger(), "Subscribed to /a/Odometry and /speed_source topics");
     return true;
@@ -115,29 +133,33 @@ void UartToStm32::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
   const double linear_x = msg->twist.twist.linear.x;
   const double linear_y = msg->twist.twist.linear.y;
   const double linear_z = msg->twist.twist.linear.z;
-  const double angular_x = msg->twist.twist.angular.x;
-  const double angular_y = msg->twist.twist.angular.y;
-  const double angular_z = msg->twist.twist.angular.z;
 
-  // RCLCPP_INFO_THROTTLE(
-  //   node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
-  //   "Odometry: linear(%.3f, %.3f, %.3f) angular(%.3f, %.3f, %.3f) yaw=%.2f deg",
-  //   linear_x, linear_y, linear_z, angular_x, angular_y, angular_z, yaw * 180.0 / M_PI);
-
+  // Store yaw for use by ego_targetVelocityCallback
   {
     std::lock_guard<std::mutex> lock(odom_mutex_);
     current_yaw_rad_ = yaw;
     has_odom_ = true;
   }
 
-  // Treat odometry twist as world-frame velocity and convert to body frame.
+  // Convert world-frame velocity to body frame and store for timer-driven send
   const double vel_body_x = linear_x * std::cos(yaw) + linear_y * std::sin(yaw);
   const double vel_body_y = -linear_x * std::sin(yaw) + linear_y * std::cos(yaw);
   const double vel_body_z = linear_z;
 
-  Eigen::Vector3d body_vel(linear_x, linear_y, linear_z);
-  // Eigen::Vector3d body_vel(vel_body_x, vel_body_y, vel_body_z);
-  sendVelocityToSerial(body_vel);
+  {
+    std::lock_guard<std::mutex> lock(velocity_mutex_);
+    latest_odom_velocity_ = Eigen::Vector3d(vel_body_x, vel_body_y, vel_body_z);
+    last_odom_time_ = msg->header.stamp;
+    has_stored_velocity_ = true;
+
+    // Diagnostic: measure delivery delay vs timestamp age
+    // const auto now_ns = node_->now().nanoseconds();
+    // const auto stamp_ns = msg->header.stamp.nanosec + msg->header.stamp.sec * 1000000000L;
+    // const auto delivery_delay_ms = (now_ns - stamp_ns) / 1000000.0;
+    // RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+    //   "[ODOM-DIAG] stamp_age_ms=%.0f  stored_vel=(%.2f,%.2f,%.2f)",
+    //   delivery_delay_ms, vel_body_x, vel_body_y, vel_body_z);
+  }
 }
 
 void UartToStm32::droneCommandCallback(const std_msgs::msg::UInt8::SharedPtr msg)
@@ -160,6 +182,8 @@ void UartToStm32::droneCommandCallback(const std_msgs::msg::UInt8::SharedPtr msg
  */
 void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_velocity)
 {
+  std::lock_guard<std::mutex> lock(serial_write_mutex_);
+
   if (!serial_comm_ || !serial_comm_->is_open()) {
     RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
       "Serial port is not open, cannot send velocity data");
@@ -182,8 +206,9 @@ void UartToStm32::sendVelocityToSerial(const Eigen::Vector3d & transformed_veloc
     data[5] = static_cast<uint8_t>((vel_z >> 8) & 0xFF);
 
     if (serial_comm_->send_protocol_data(VELOCITY_FRAME_ID, static_cast<uint8_t>(data.size()), data)) {
-      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
         "Sent velocity data: x=%d, y=%d, z=%d (cm/s)", vel_x, vel_y, vel_z);
+      // RCLCPP_INFO(node_->get_logger(), "Sent velocity data: x=%d, y=%d, z=%d (cm/s)", vel_x, vel_y, vel_z);
     } else {
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
         "Failed to send velocity data: %s", serial_comm_->get_last_error().c_str());
@@ -213,10 +238,10 @@ void UartToStm32::targetVelocityCallback(const std_msgs::msg::Float32MultiArray:
   const float vz_cm_per_s = msg->data[2];
   const float vyaw_deg_per_s = msg->data[3];
 
-  RCLCPP_INFO_THROTTLE(
-    node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
-    "Target Velocity: linear(%.1f, %.1f, %.1f)cm/s angular(%.1f)deg/s",
-    vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
+  // RCLCPP_INFO_THROTTLE(
+  //   node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+  //   "Target Velocity: linear(%.1f, %.1f, %.1f)cm/s angular(%.1f)deg/s",
+  //   vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
 
   sendTargetVelocityToSerial(vx_cm_per_s, vy_cm_per_s, vz_cm_per_s, vyaw_deg_per_s);
 }
@@ -285,6 +310,8 @@ void UartToStm32::ego_targetVelocityCallback(const quadrotor_msgs::msg::Position
  */
 void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_s, float vz_cm_per_s, float vyaw_deg_per_s)
 {
+  std::lock_guard<std::mutex> lock(serial_write_mutex_);
+
   if (!serial_comm_ || !serial_comm_->is_open()) {
     RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
       "Serial port is not open, cannot send target velocity data");
@@ -308,7 +335,7 @@ void UartToStm32::sendTargetVelocityToSerial(float vx_cm_per_s, float vy_cm_per_
     data[7] = static_cast<uint8_t>((vel_yaw >> 8) & 0xFF);
 
     if (serial_comm_->send_protocol_data(TARGET_VELOCITY_FRAME_ID, static_cast<uint8_t>(data.size()), data)) {
-      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
         "Sent target velocity data: x=%d, y=%d, z=%d, yaw=%d",
         vel_x, vel_y, vel_z, vel_yaw);
     } else {
@@ -359,9 +386,9 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
           is_st_ready_pub_->publish(msg);
           RCLCPP_INFO(node_->get_logger(), "Published /is_st_ready: 1 (from 0xF1 frame)");
         }
-        // if(!drone_command_){
-        //   break;
-        // }
+        if(!drone_command_){
+          break;
+        }
         sendA2ReadyResponse();
         sendA2ReadyResponse();
         sendA2ReadyResponse();
@@ -382,7 +409,7 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
       msg.data = value;
       if (height_pub_) {
         height_pub_->publish(msg);
-        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
+        RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
           "Published /height: %d", value);
       } else {
         RCLCPP_WARN(node_->get_logger(), "Height publisher not initialized");
@@ -405,6 +432,8 @@ void UartToStm32::protocolDataHandler(uint8_t id, const std::vector<uint8_t> & d
  */
 void UartToStm32::sendA2ReadyResponse()
 {
+  std::lock_guard<std::mutex> lock(serial_write_mutex_);
+
   if (!serial_comm_ || !serial_comm_->is_open()) {
     RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), log_throttle_interval_,
       "Serial port is not open, cannot send A2 ready response");
@@ -418,6 +447,57 @@ void UartToStm32::sendA2ReadyResponse()
   } else {
     RCLCPP_WARN(node_->get_logger(), "Failed to send A2 ready response: %s", serial_comm_->get_last_error().c_str());
   }
+}
+
+void UartToStm32::velocityTimerCallback()
+{
+  Eigen::Vector3d vel_to_send;
+  bool is_stale = false;
+
+  {
+    std::lock_guard<std::mutex> lock(velocity_mutex_);
+    if (!has_stored_velocity_) {
+      return;  // No odometry received yet, skip this cycle
+    }
+    vel_to_send = latest_odom_velocity_;
+
+    const rclcpp::Time now = node_->now();
+    const double dt = (now - last_odom_time_).seconds();
+    if (dt > stale_timeout_sec_) {
+      is_stale = true;
+      if (zero_on_stale_) {
+        vel_to_send = Eigen::Vector3d::Zero();
+      }
+      RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000,
+        "Odometry stale for %.2f s (>%.2f s), sending %s",
+        dt, stale_timeout_sec_,
+        zero_on_stale_ ? "zeros" : "last known velocity");
+    }
+  }
+
+  sendVelocityToSerial(vel_to_send);
+}
+
+rcl_interfaces::msg::SetParametersResult UartToStm32::onParameterChange(
+  const std::vector<rclcpp::Parameter> & parameters)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+
+  for (const auto & param : parameters) {
+    if (param.get_name() == "stale_timeout_s") {
+      double val = param.as_double();
+      if (val < 0.05) val = 0.05;
+      if (val > 1.0)  val = 1.0;
+      stale_timeout_sec_ = val;
+      RCLCPP_INFO(node_->get_logger(), "stale_timeout_s updated to %.2f", val);
+    } else if (param.get_name() == "zero_on_stale") {
+      zero_on_stale_ = param.as_bool();
+      RCLCPP_INFO(node_->get_logger(), "zero_on_stale updated to %s",
+                  zero_on_stale_ ? "true" : "false");
+    }
+  }
+  return result;
 }
 
 }  // namespace uart_to_stm32

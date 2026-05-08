@@ -20,6 +20,7 @@
 #include <string>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
 
 #include "uart_to_stm32/uart_to_stm32.hpp"
 
@@ -46,7 +47,10 @@ int main(int argc, char ** argv)
       return EXIT_FAILURE;
     }
 
-    rclcpp::spin(node);
+    rclcpp::executors::MultiThreadedExecutor executor(
+      rclcpp::ExecutorOptions(), 2);  // 2 threads: timer+serial, DDS callbacks
+    executor.add_node(node);
+    executor.spin();
   } catch (const std::exception & e) {
     RCLCPP_FATAL(node->get_logger(), "Exception in main: %s", e.what());
     rclcpp::shutdown();

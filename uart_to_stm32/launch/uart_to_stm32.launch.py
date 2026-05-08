@@ -53,6 +53,8 @@ def generate_launch_description() -> LaunchDescription:
                 'baud_rate': 921600,
                 'log_throttle_interval': 5000,
                 'use_target_velocity_topic': use_target_velocity_topic,
+                'stale_timeout_s': 0.2,
+                'zero_on_stale': False,
             }]
         )
     ])

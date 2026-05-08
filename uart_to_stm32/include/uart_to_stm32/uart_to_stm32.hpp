@@ -9,6 +9,7 @@
 #include <Eigen/Dense>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <quadrotor_msgs/msg/position_command.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
@@ -173,6 +174,42 @@ private:
 
   /// Protect shared yaw state across callbacks.
   std::mutex odom_mutex_;
+
+  // --- Timer-driven velocity feedback (decoupled from DDS callbacks) ---
+
+  /// 50Hz timer callback: reads stored velocity and sends to serial at fixed rate
+  void velocityTimerCallback();
+
+  /// Dynamic parameter reconfiguration callback
+  rcl_interfaces::msg::SetParametersResult onParameterChange(
+    const std::vector<rclcpp::Parameter> & parameters);
+
+  /// Latest odometry velocity in body frame, set by odometry callback
+  Eigen::Vector3d latest_odom_velocity_{Eigen::Vector3d::Zero()};
+
+  /// Whether at least one odometry velocity has been stored
+  bool has_stored_velocity_{false};
+
+  /// Timestamp of last odometry message for staleness detection
+  rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
+
+  /// Mutex protecting latest_odom_velocity_, has_stored_velocity_, last_odom_time_
+  std::mutex velocity_mutex_;
+
+  /// 50Hz timer for decoupled velocity feedback
+  rclcpp::TimerBase::SharedPtr velocity_timer_;
+
+  /// Max age of stored velocity before considered stale (seconds)
+  double stale_timeout_sec_{0.2};
+
+  /// If true, send zero velocity when odometry is stale; else keep last known
+  bool zero_on_stale_{true};
+
+  /// Parameter callback handle
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
+
+  /// Mutex to serialize all serial write operations (MultiThreadedExecutor safety)
+  std::mutex serial_write_mutex_;
 
   // Protocol frame IDs 
   static constexpr uint8_t VELOCITY_FRAME_ID = 0x32;
